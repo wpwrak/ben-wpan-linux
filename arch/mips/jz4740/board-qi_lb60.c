@@ -118,8 +118,13 @@ static struct mtd_partition qi_lb60_partitions_2gb[] = {
 	{
 		.name = "NAND ROOTFS partition",
 		.offset = 8 * 0x100000,
-		.size = (504 + 512 + 1024) * 0x100000,
+		.size = 512 * 0x100000,
 	},
+        { 
+		.name = "NAND DATA partition",
+		.offset = 520 * 0x100000,
+		.size = 1528 * 0x100000,
+        },
 };
 
 static void qi_lb60_nand_ident(struct platform_device *pdev,
