@@ -58,6 +58,7 @@ struct atusb_local {
 	struct usb_device *udev;
 	/* The interface to the RF part info, if applicable */
 	struct urb *rx_urb;
+	struct sk_buff *rx_skb;
 	struct completion tx_complete;
 };
 
@@ -192,6 +193,8 @@ static int submit_rx_urb(struct atusb_local *atusb,
 	usb_fill_bulk_urb(urb, dev, usb_rcvbulkpipe(dev, 1),
 	    skb->data, MAX_PDU, atusb_in, atusb);
 
+	atusb->rx_skb = skb;
+
 	retval = usb_submit_urb(urb, GFP_KERNEL);
 	if (retval) {
 		kfree_skb(skb);
@@ -203,10 +206,9 @@ static int submit_rx_urb(struct atusb_local *atusb,
 
 static void atusb_in(struct urb *urb)
 {
-	struct sk_buff *skb = urb->context;
+	struct atusb_local *atusb = urb->context;
 	struct usb_device *dev = urb->dev;
-	struct atusb_local *atusb =
-	    usb_get_intfdata(to_usb_interface(&dev->dev));
+	struct sk_buff *skb = atusb->rx_skb;
 	uint8_t len;
 
 	dev_dbg(&dev->dev, "atusb_in: status %d len %d\n",
@@ -469,6 +471,7 @@ static int atusb_probe(struct usb_interface *interface,
 	usb_set_intfdata(interface, atusb);
 
 	init_completion(&atusb->tx_complete);
+	atusb->tx_complete.done = 1; /* @@@ hack */
 	atusb->rx_urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!atusb->rx_urb)
 		goto fail_nourb;
