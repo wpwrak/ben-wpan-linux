@@ -191,11 +191,9 @@ static int submit_rx_urb(struct atusb_local *atusb,
 	retval = usb_submit_urb(urb, GFP_KERNEL);
 	if (retval) {
 		kfree_skb(skb);
-		usb_free_urb(urb);
 		return retval;
 	}
 
-	atusb->rx_urb = urb;
 	return 0;
 }
 
@@ -207,12 +205,9 @@ static void atusb_in(struct urb *urb)
 	    usb_get_intfdata(to_usb_interface(&dev->dev));
 	uint8_t len;
 
-	/* @@@ lock */
-	atusb->rx_urb = NULL;
 	if (urb->status) {
 		if (urb->status == -ENOENT) { /* being killed */
 			kfree_skb(skb);
-			usb_free_urb(urb);
 			return;
 		}
 		dev_dbg(&dev->dev, "atusb_in: URB error %d\n", urb->status);
@@ -231,10 +226,9 @@ static void atusb_in(struct urb *urb)
 		skb_trim(skb, len - 2); /* remove CRC */
 		ieee802154_rx_irqsafe(atusb->dev, skb, 0); /* @@@ lqi */
 		skb = atusb_alloc_skb(&dev->dev);
-		if (skb)
-			break;
-		usb_free_urb(urb);
-		return;
+		if (!skb)
+			return;
+		break;
 	}
 
 recycle:
@@ -245,19 +239,13 @@ recycle:
 static int start_rx_urb(struct atusb_local *atusb)
 {
 	struct usb_device *dev = atusb->udev;
-	struct urb *urb;
 	struct sk_buff *skb;
 
-	urb = usb_alloc_urb(0, GFP_KERNEL);
-        if (!urb)
-		return -ENOMEM;
 	skb = atusb_alloc_skb(&dev->dev);
-	if (!skb) {
-		usb_free_urb(urb);
+	if (!skb)
 		return -ENOMEM;
-	}
 
-	return submit_rx_urb(atusb, urb, skb);
+	return submit_rx_urb(atusb, atusb->rx_urb, skb);
 }
 
 
@@ -322,10 +310,8 @@ static int atusb_start(struct ieee802154_dev *dev)
 	if (retval)
 		return retval;
 	retval = atusb_command(atusb, ATUSB_RX_MODE, 1);
-	if (retval < 0) {
+	if (retval < 0)
 		usb_kill_urb(atusb->rx_urb);
-		atusb->rx_urb = NULL;
-	}
 	return retval;
 }
 
@@ -333,10 +319,7 @@ static void atusb_stop(struct ieee802154_dev *dev)
 {
 	struct atusb_local *atusb = dev->priv;
 
-	if (atusb->rx_urb) {
-		usb_kill_urb(atusb->rx_urb);
-		atusb->rx_urb = NULL;
-	}
+	usb_kill_urb(atusb->rx_urb);
 	atusb_command(atusb, ATUSB_RX_MODE, 0);
 }
 
@@ -445,7 +428,7 @@ static int atusb_probe(struct usb_interface *interface,
 	struct usb_device *udev = interface_to_usbdev(interface);
 	struct ieee802154_dev *dev;
 	struct atusb_local *atusb = NULL;
-	int retval;
+	int retval = -ENOMEM;
 
 	dev = ieee802154_alloc_device(sizeof(struct atusb_local), &atusb_ops);
 	if (!dev)
@@ -457,6 +440,9 @@ static int atusb_probe(struct usb_interface *interface,
 	usb_set_intfdata(interface, atusb);
 
 	init_completion(&atusb->tx_complete);
+	atusb->rx_urb = usb_alloc_urb(0, GFP_KERNEL);
+	if (!atusb->rx_urb)
+		goto fail_nourb;
 
 	dev->parent = &udev->dev;
 	dev->extra_tx_headroom = 0;
@@ -486,6 +472,8 @@ static int atusb_probe(struct usb_interface *interface,
 		return 0;
 
 fail:
+	usb_free_urb(atusb->rx_urb);
+fail_nourb:
 	usb_put_dev(udev);
 	ieee802154_free_device(dev);
 	return retval;
@@ -496,8 +484,8 @@ static void atusb_disconnect(struct usb_interface *interface)
 	struct atusb_local *atusb = usb_get_intfdata(interface);
 
 	/* @@@ this needs some extra protecion - wa */
-	if (atusb->rx_urb)
-		usb_kill_urb(atusb->rx_urb);
+	usb_kill_urb(atusb->rx_urb);
+	usb_free_urb(atusb->rx_urb);
 #if 0 /* @@@ check xmit synchronization */
 	if (atusb->tx_urb)
 		usb_kill_urb(atusb->tx_urb);
