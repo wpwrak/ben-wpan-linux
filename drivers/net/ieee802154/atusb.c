@@ -29,12 +29,12 @@
  * - harmonize indentation style
  * - check module load/unload
  * - review dev_* severity levels and error reporting in general
- * - check CRC (do this in firmware)
  * - buffer protection (we should need only dynamic)
  * - AACK mode (needs firmware support)
  * - address filtering
  * - add timeouts to all unbounded loops in firmware, and error handling
  * - Q: move more severe on/off operation into start/stop ? e.g., reset
+ * - think about setting power levels
  */
 
 #define	DEBUG
@@ -491,8 +491,11 @@ static int atusb_probe(struct usb_interface *interface,
 
 	dev->parent = &udev->dev;
 	dev->extra_tx_headroom = 0;
-	dev->phy->channels_supported[0] = 0x7FFF800;
 	dev->flags = IEEE802154_HW_OMIT_CKSUM;
+
+	dev->phy->current_page = 0;
+	dev->phy->current_channel = 11;	/* reset default */
+	dev->phy->channels_supported[0] = 0x7FFF800;
 
 	ret = atusb_command(atusb, ATUSB_RF_RESET, 0);
 	if (ret < 0) {
