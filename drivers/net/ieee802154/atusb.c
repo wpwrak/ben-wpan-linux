@@ -144,14 +144,14 @@ static int atusb_write_reg(struct atusb_local *atusb, uint8_t reg,
 
 static int atusb_read_reg(struct atusb_local *atusb, uint8_t reg)
 {
-	int retval;
+	int ret;
 	uint8_t value;
 
 	dev_dbg(&atusb->udev->dev, "atusb_read_reg: reg = 0x%x\n", reg);
-	retval = usb_control_msg(atusb->udev, usb_rcvctrlpipe(atusb->udev, 0),
+	ret = usb_control_msg(atusb->udev, usb_rcvctrlpipe(atusb->udev, 0),
 	    ATUSB_REG_READ, ATUSB_FROM_DEV, 0, reg, &value, 1, 1000);
-	if (retval < 0)
-		return retval;
+	if (ret < 0)
+		return ret;
 	return value;
 }
 
@@ -188,17 +188,17 @@ static int submit_rx_urb(struct atusb_local *atusb,
     struct urb *urb, struct sk_buff *skb)
 {
 	struct usb_device *dev = atusb->udev;
-	int retval;
+	int ret;
 
 	usb_fill_bulk_urb(urb, dev, usb_rcvbulkpipe(dev, 1),
 	    skb->data, MAX_PDU, atusb_in, atusb);
 
 	atusb->rx_skb = skb;
 
-	retval = usb_submit_urb(urb, GFP_KERNEL);
-	if (retval) {
+	ret = usb_submit_urb(urb, GFP_KERNEL);
+	if (ret) {
 		kfree_skb(skb);
-		return retval;
+		return ret;
 	}
 
 	return 0;
@@ -254,18 +254,18 @@ static int start_rx_urb(struct atusb_local *atusb)
 {
 	struct usb_device *dev = atusb->udev;
 	struct sk_buff *skb;
-	int retval;
+	int ret;
 
 	dev_dbg(&dev->dev, "start_rx_urb\n");
 	skb = atusb_alloc_skb(&dev->dev);
 	if (!skb)
 		return -ENOMEM;
 
-	retval = submit_rx_urb(atusb, atusb->rx_urb, skb);
-	if (retval)
+	ret = submit_rx_urb(atusb, atusb->rx_urb, skb);
+	if (ret)
 		dev_err(&dev->dev, "start_rx_urb: can't submit URB, error %d\n",
-		    retval);
-	return retval;
+		    ret);
+	return ret;
 }
 
 
@@ -276,18 +276,18 @@ static int atusb_xmit(struct ieee802154_dev *dev, struct sk_buff *skb)
 {
 	struct atusb_local *atusb = dev->priv;
 	struct usb_device *usb_dev = atusb->udev;
-	int retval;
+	int ret;
 
 	dev_dbg(&usb_dev->dev, "atusb_xmit\n");
 	if (!completion_done(&atusb->tx_complete))
 		return -EBUSY;
 	INIT_COMPLETION(atusb->tx_complete);
-	retval = usb_control_msg(atusb->udev, usb_sndctrlpipe(atusb->udev, 0),
+	ret = usb_control_msg(atusb->udev, usb_sndctrlpipe(atusb->udev, 0),
 	    ATUSB_TX, ATUSB_TO_DEV, 0, 0, skb->data, skb->len, 1000);
-	if (retval < 0) {
+	if (ret < 0) {
 		printk(KERN_WARNING "atusb_xmit: sending failed, error %d\n",
-		    retval);
-		return retval;
+		    ret);
+		return ret;
 	}
 
 	return wait_for_completion_interruptible_timeout(&atusb->tx_complete,
@@ -297,16 +297,16 @@ static int atusb_xmit(struct ieee802154_dev *dev, struct sk_buff *skb)
 static int atusb_channel(struct ieee802154_dev *dev, int page, int channel)
 {
 	struct atusb_local *atusb = dev->priv;
-	int retval;
+	int ret;
 
 	if (page || channel < 11 || channel > 26) {
 		dev_err(&atusb->udev->dev,
 		    "invalid channel: page %d channel %d\n", page, channel);
 		return -EINVAL;
 	}
-	retval = atusb_write_reg(atusb, RG_PHY_CC_CCA, channel);
-	if (retval)
-		return retval;
+	ret = atusb_write_reg(atusb, RG_PHY_CC_CCA, channel);
+	if (ret < 0)
+		return ret;
 	msleep(1);	/* @@@ ugly synchronization */
 	dev->phy->current_page = page;
 	dev->phy->current_channel = channel;
@@ -332,16 +332,16 @@ static int atusb_start(struct ieee802154_dev *dev)
 {
 	struct atusb_local *atusb = dev->priv;
 	struct usb_device *usb_dev = atusb->udev;
-	int retval;
+	int ret;
 
 	dev_dbg(&usb_dev->dev, "atusb_start\n");
-	retval = start_rx_urb(atusb);
-	if (retval)
-		return retval;
-	retval = atusb_command(atusb, ATUSB_RX_MODE, 1);
-	if (retval < 0)
+	ret = start_rx_urb(atusb);
+	if (ret)
+		return ret;
+	ret = atusb_command(atusb, ATUSB_RX_MODE, 1);
+	if (ret < 0)
 		usb_kill_urb(atusb->rx_urb);
-	return retval;
+	return ret;
 }
 
 static void atusb_stop(struct ieee802154_dev *dev)
@@ -372,17 +372,17 @@ static int atusb_get_and_show_revision(struct atusb_local *atusb)
 {
 	struct usb_device *dev = atusb->udev;
 	unsigned char buffer[3];
-	int retval;
+	int ret;
 
 	/* Get a couple of the ATMega Firmware values */
-	retval = usb_control_msg(dev,
+	ret = usb_control_msg(dev,
 	    usb_rcvctrlpipe(dev, 0),
 	    ATUSB_ID, ATUSB_FROM_DEV, 0, 0,
 	    buffer, 3, 1000);
-	if (retval < 0) {
+	if (ret < 0) {
 		dev_info(&dev->dev,
-		    "failed submitting urb for ATUSB_ID, error %d\n", retval);
-		return retval == -ENOMEM ? retval : -EIO;
+		    "failed submitting urb for ATUSB_ID, error %d\n", ret);
+		return ret == -ENOMEM ? ret : -EIO;
 	}
 
 
@@ -397,20 +397,20 @@ static int atusb_get_and_show_build(struct atusb_local *atusb)
 {
 	struct usb_device *dev = atusb->udev;
 	char build[ATUSB_BUILD_SIZE + 1];
-	int retval;
+	int ret;
 
-	retval = usb_control_msg(dev,
+	ret = usb_control_msg(dev,
 	    usb_rcvctrlpipe(atusb->udev, 0),
 	    ATUSB_BUILD, ATUSB_FROM_DEV, 0, 0,
 	    build, ATUSB_BUILD_SIZE, 1000);
-	if (retval < 0) {
+	if (ret < 0) {
 		dev_err(&dev->dev,
 		    "failed submitting urb for ATUSB_BUILD, error %d\n",
-		    retval);
-		return retval == -ENOMEM ? retval : -EIO;
+		    ret);
+		return ret == -ENOMEM ? ret : -EIO;
 	}
 
-	build[retval] = 0;
+	build[ret] = 0;
 	dev_info(&dev->dev, "Firmware: build %s\n", build);
 
 	return 0;
@@ -459,7 +459,7 @@ static int atusb_probe(struct usb_interface *interface,
 	struct usb_device *udev = interface_to_usbdev(interface);
 	struct ieee802154_dev *dev;
 	struct atusb_local *atusb = NULL;
-	int retval = -ENOMEM;
+	int ret = -ENOMEM;
 
 	dev = ieee802154_alloc_device(sizeof(struct atusb_local), &atusb_ops);
 	if (!dev)
@@ -481,33 +481,33 @@ static int atusb_probe(struct usb_interface *interface,
 	dev->phy->channels_supported[0] = 0x7FFF800;
 	dev->flags = IEEE802154_HW_OMIT_CKSUM;
 
-	retval = atusb_command(atusb, ATUSB_RF_RESET, 0);
-	if (retval < 0) {
+	ret = atusb_command(atusb, ATUSB_RF_RESET, 0);
+	if (ret < 0) {
 		dev_err(&atusb->udev->dev,
-			"%s: error doing reset retval = %d\n",
-			__func__, retval);
+			"%s: reset failed, error = %d\n",
+			__func__, ret);
 		goto fail;
 	}
 
-	retval = atusb_get_and_show_chip(atusb);
-	if (retval)
+	ret = atusb_get_and_show_chip(atusb);
+	if (ret)
 		goto fail;
-	retval = atusb_get_and_show_revision(atusb);
-	if (retval)
+	ret = atusb_get_and_show_revision(atusb);
+	if (ret)
 		goto fail;
-	retval = atusb_get_and_show_build(atusb);
-	if (retval)
-		goto fail;
-
-	retval = ieee802154_register_device(dev);
-	if (retval)
+	ret = atusb_get_and_show_build(atusb);
+	if (ret)
 		goto fail;
 
-	retval = atusb_write_reg(atusb, RG_TRX_STATE, STATE_FORCE_TRX_OFF);
-	if (retval)
+	ret = ieee802154_register_device(dev);
+	if (ret)
+		goto fail;
+
+	ret = atusb_write_reg(atusb, RG_TRX_STATE, STATE_FORCE_TRX_OFF);
+	if (ret < 0)
 		goto fail_registered;
-	retval = atusb_write_reg(atusb, RG_IRQ_MASK, 0xff);
-	if (!retval)
+	ret = atusb_write_reg(atusb, RG_IRQ_MASK, 0xff);
+	if (ret >= 0)
 		return 0;
 
 fail_registered:
@@ -517,7 +517,7 @@ fail:
 fail_nourb:
 	usb_put_dev(udev);
 	ieee802154_free_device(dev);
-	return retval;
+	return ret;
 }
 
 static void atusb_disconnect(struct usb_interface *interface)
