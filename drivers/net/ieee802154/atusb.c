@@ -31,6 +31,8 @@
  * - review dev_* severity levels and error reporting in general
  */
 
+#define	DEBUG
+
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/module.h>
@@ -250,12 +252,18 @@ static int start_rx_urb(struct atusb_local *atusb)
 {
 	struct usb_device *dev = atusb->udev;
 	struct sk_buff *skb;
+	int retval;
 
+	dev_dbg(&dev->dev, "start_rx_urb\n");
 	skb = atusb_alloc_skb(&dev->dev);
 	if (!skb)
 		return -ENOMEM;
 
-	return submit_rx_urb(atusb, atusb->rx_urb, skb);
+	retval = submit_rx_urb(atusb, atusb->rx_urb, skb);
+	if (retval)
+		dev_err(&dev->dev, "start_rx_urb: can't submit URB, error %d\n",
+		    retval);
+	return retval;
 }
 
 
@@ -265,8 +273,10 @@ static int start_rx_urb(struct atusb_local *atusb)
 static int atusb_xmit(struct ieee802154_dev *dev, struct sk_buff *skb)
 {
 	struct atusb_local *atusb = dev->priv;
+	struct usb_device *usb_dev = atusb->udev;
 	int retval;
 
+	dev_dbg(&usb_dev->dev, "atusb_xmit\n");
 	if (!completion_done(&atusb->tx_complete))
 		return -EBUSY;
 	INIT_COMPLETION(atusb->tx_complete);
@@ -285,16 +295,21 @@ static int atusb_xmit(struct ieee802154_dev *dev, struct sk_buff *skb)
 static int atusb_channel(struct ieee802154_dev *dev, int page, int channel)
 {
 	struct atusb_local *atusb = dev->priv;
+	int retval;
 
 	if (page || channel < 11 || channel > 26) {
 		dev_err(&atusb->udev->dev,
 		    "invalid channel: page %d channel %d\n", page, channel);
 		return -EINVAL;
 	}
-	atusb_write_reg(atusb, RG_PHY_CC_CCA, channel);
+	retval = atusb_write_reg(atusb, RG_PHY_CC_CCA, channel);
+	if (retval)
+		return retval;
+	msleep(1);	/* @@@ ugly synchronization */
+	dev->phy->current_page = page;
+	dev->phy->current_channel = channel;
 /* @@@ set CCA mode */
-/* @@@ synchronize */
-	return -EIO;
+	return 0;
 }
 
 static int atusb_ed(struct ieee802154_dev *dev, u8 *level)
@@ -314,8 +329,10 @@ static int atusb_set_hw_addr_filt(struct ieee802154_dev *dev,
 static int atusb_start(struct ieee802154_dev *dev)
 {
 	struct atusb_local *atusb = dev->priv;
+	struct usb_device *usb_dev = atusb->udev;
 	int retval;
 
+	dev_dbg(&usb_dev->dev, "atusb_start\n");
 	retval = start_rx_urb(atusb);
 	if (retval)
 		return retval;
@@ -328,7 +345,9 @@ static int atusb_start(struct ieee802154_dev *dev)
 static void atusb_stop(struct ieee802154_dev *dev)
 {
 	struct atusb_local *atusb = dev->priv;
+	struct usb_device *usb_dev = atusb->udev;
 
+	dev_dbg(&usb_dev->dev, "atusb_stop\n");
 	usb_kill_urb(atusb->rx_urb);
 	atusb_command(atusb, ATUSB_RX_MODE, 0);
 }
@@ -478,9 +497,18 @@ static int atusb_probe(struct usb_interface *interface,
 		goto fail;
 
 	retval = ieee802154_register_device(dev);
+	if (retval)
+		goto fail;
+
+	retval = atusb_write_reg(atusb, RG_TRX_STATE, STATE_FORCE_TRX_OFF);
+	if (retval)
+		goto fail_registered;
+	retval = atusb_write_reg(atusb, RG_IRQ_MASK, 0xff);
 	if (!retval)
 		return 0;
 
+fail_registered:
+	ieee802154_unregister_device(dev);
 fail:
 	usb_free_urb(atusb->rx_urb);
 fail_nourb:
@@ -501,9 +529,11 @@ static void atusb_disconnect(struct usb_interface *interface)
 		usb_kill_urb(atusb->tx_urb);
 #endif
 
+	ieee802154_unregister_device(atusb->dev);
+	ieee802154_free_device(atusb->dev);
+
 	usb_set_intfdata(interface, NULL);
 	usb_put_dev(atusb->udev);
-
 }
 
 /* The devices we work with */
