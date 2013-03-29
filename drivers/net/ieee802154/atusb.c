@@ -29,6 +29,12 @@
  * - harmonize indentation style
  * - check module load/unload
  * - review dev_* severity levels and error reporting in general
+ * - check CRC (do this in firmware)
+ * - buffer protection (we should need only dynamic)
+ * - AACK mode (needs firmware support)
+ * - address filtering
+ * - add timeouts to all unbounded loops in firmware, and error handling
+ * - Q: move more severe on/off operation into start/stop ? e.g., reset
  */
 
 #define	DEBUG
@@ -324,8 +330,8 @@ static int atusb_channel(struct ieee802154_dev *dev, int page, int channel)
 
 static int atusb_ed(struct ieee802154_dev *dev, u8 *level)
 {
-	might_sleep();
-	*level = 0xbe;	/* @@@ implement */
+	/* @@@ not used by the stack yet */
+	*level = 0;
 	return 0;
 }
 
