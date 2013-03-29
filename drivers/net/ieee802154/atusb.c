@@ -211,7 +211,7 @@ static void atusb_in(struct urb *urb)
 	struct atusb_local *atusb = urb->context;
 	struct usb_device *dev = urb->dev;
 	struct sk_buff *skb = atusb->rx_skb;
-	uint8_t len;
+	uint8_t len, lqi;
 
 	dev_dbg(&dev->dev, "atusb_in: status %d len %d\n",
 	    urb->status, urb->actual_length);
@@ -225,8 +225,8 @@ static void atusb_in(struct urb *urb)
 	}
 
 	len = *skb->data;
-	if (!urb->actual_length || len+1 > urb->actual_length) {
-		dev_dbg(&dev->dev, "atusb_in: frame len %d+1 > URB %u\n",
+	if (!urb->actual_length || len+1 > urb->actual_length-1) {
+		dev_dbg(&dev->dev, "atusb_in: frame len %d+1 > URB %u-1\n",
 		    len, urb->actual_length);
 		goto recycle;
 	}
@@ -239,8 +239,11 @@ static void atusb_in(struct urb *urb)
 		dev_dbg(&dev->dev, "atusb_in: frame is too small\n");
 		break;
 	default:
+		lqi = skb->data[len+1];
+		dev_dbg(&dev->dev, "atusb_in: rx len %d lqi 0x%02x\n",
+		    len, lqi);
 		skb_trim(skb, len-2); /* remove CRC */
-		ieee802154_rx_irqsafe(atusb->dev, skb, 0); /* @@@ lqi */
+		ieee802154_rx_irqsafe(atusb->dev, skb, lqi);
 		skb = atusb_alloc_skb(&dev->dev);
 		if (!skb)
 			return;
@@ -507,9 +510,16 @@ static int atusb_probe(struct usb_interface *interface,
 	if (ret)
 		goto fail;
 
+	/*
+	 * If we just powered on, we're now in P_ON and need to enter TRX_OFF
+	 * explicitly. Any resets after that will send us straight to TRX_OFF,
+	 * making the command below redundant.
+	 */
 	ret = atusb_write_reg(atusb, RG_TRX_STATE, STATE_FORCE_TRX_OFF);
 	if (ret < 0)
 		goto fail_registered;
+	msleep(1);	/* reset => TRX_OFF, tTR13 = 37 us */
+
 	ret = atusb_write_reg(atusb, RG_IRQ_MASK, 0xff);
 	if (ret >= 0)
 		return 0;
