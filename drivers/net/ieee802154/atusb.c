@@ -38,6 +38,7 @@
 #include <linux/module.h>
 #include <linux/jiffies.h>
 #include <linux/interrupt.h>
+#include <linux/semaphore.h>
 #include <linux/usb.h>
 #include <linux/skbuff.h>
 
@@ -59,6 +60,7 @@ struct atusb_local {
 	/* The interface to the RF part info, if applicable */
 	struct urb *rx_urb;
 	struct sk_buff *rx_skb;
+	struct semaphore tx_sem;
 	struct completion tx_complete;
 };
 
@@ -223,8 +225,8 @@ static void atusb_in(struct urb *urb)
 	}
 
 	len = *skb->data;
-	if (!urb->actual_length || len + 1 > urb->actual_length) {
-		dev_dbg(&dev->dev, "atusb_in: frame len %d + 1 > URB %u\n",
+	if (!urb->actual_length || len+1 > urb->actual_length) {
+		dev_dbg(&dev->dev, "atusb_in: frame len %d+1 > URB %u\n",
 		    len, urb->actual_length);
 		goto recycle;
 	}
@@ -237,7 +239,7 @@ static void atusb_in(struct urb *urb)
 		dev_dbg(&dev->dev, "atusb_in: frame is too small\n");
 		break;
 	default:
-		skb_trim(skb, len - 2); /* remove CRC */
+		skb_trim(skb, len-2); /* remove CRC */
 		ieee802154_rx_irqsafe(atusb->dev, skb, 0); /* @@@ lqi */
 		skb = atusb_alloc_skb(&dev->dev);
 		if (!skb)
@@ -279,7 +281,7 @@ static int atusb_xmit(struct ieee802154_dev *dev, struct sk_buff *skb)
 	int ret;
 
 	dev_dbg(&usb_dev->dev, "atusb_xmit\n");
-	if (!completion_done(&atusb->tx_complete))
+	if (down_trylock(&atusb->tx_sem))
 		return -EBUSY;
 	INIT_COMPLETION(atusb->tx_complete);
 	ret = usb_control_msg(atusb->udev, usb_sndctrlpipe(atusb->udev, 0),
@@ -287,11 +289,14 @@ static int atusb_xmit(struct ieee802154_dev *dev, struct sk_buff *skb)
 	if (ret < 0) {
 		printk(KERN_WARNING "atusb_xmit: sending failed, error %d\n",
 		    ret);
-		return ret;
+		goto done;
 	}
 
-	return wait_for_completion_interruptible_timeout(&atusb->tx_complete,
+	ret = wait_for_completion_interruptible_timeout(&atusb->tx_complete,
 	    msecs_to_jiffies(1000));
+done:
+	up(&atusb->tx_sem);
+	return ret;
 }
 
 static int atusb_channel(struct ieee802154_dev *dev, int page, int channel)
@@ -385,7 +390,6 @@ static int atusb_get_and_show_revision(struct atusb_local *atusb)
 		return ret == -ENOMEM ? ret : -EIO;
 	}
 
-
 	dev_info(&dev->dev,
 	    "Firmware: major: %u, minor: %u, hardware type: %u\n",
 	    buffer[0], buffer[1], buffer[2]);
@@ -396,7 +400,7 @@ static int atusb_get_and_show_revision(struct atusb_local *atusb)
 static int atusb_get_and_show_build(struct atusb_local *atusb)
 {
 	struct usb_device *dev = atusb->udev;
-	char build[ATUSB_BUILD_SIZE + 1];
+	char build[ATUSB_BUILD_SIZE+1];
 	int ret;
 
 	ret = usb_control_msg(dev,
@@ -471,7 +475,7 @@ static int atusb_probe(struct usb_interface *interface,
 	usb_set_intfdata(interface, atusb);
 
 	init_completion(&atusb->tx_complete);
-	atusb->tx_complete.done = 1; /* @@@ hack */
+	sema_init(&atusb->tx_sem, 1);
 	atusb->rx_urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!atusb->rx_urb)
 		goto fail_nourb;
@@ -526,13 +530,12 @@ static void atusb_disconnect(struct usb_interface *interface)
 
 	/* @@@ this needs some extra protecion - wa */
 	usb_kill_urb(atusb->rx_urb);
-	usb_free_urb(atusb->rx_urb);
-#if 0 /* @@@ check xmit synchronization */
-	if (atusb->tx_urb)
-		usb_kill_urb(atusb->tx_urb);
-#endif
 
 	ieee802154_unregister_device(atusb->dev);
+
+	usb_free_urb(atusb->rx_urb);
+	/* @@@ do we need to check tx_sem here ? */
+
 	ieee802154_free_device(atusb->dev);
 
 	usb_set_intfdata(interface, NULL);
