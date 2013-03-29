@@ -24,7 +24,6 @@
 /*
  * To do:
  * - disentangle pointers between the various devices (USB, wpan, atusb)
- * - get rid of buffer in atusb_local
  * - add locking of atusb_local
  * - avoid "dev" name
  * - harmonize indentation style
@@ -58,11 +57,7 @@ struct atusb_local {
 	struct usb_device *udev;
 	/* The interface to the RF part info, if applicable */
 	struct urb *rx_urb;
-	struct urb *tx_urb;
 	struct completion tx_complete;
-	struct timer_list timer;	/* delay, for interrupt synch */
-//	unsigned char buffer[3];
-	unsigned char buffer[260];	/* XXL, just in case */
 };
 
 /* Commands to our device. Make sure this is synced with the firmware */
@@ -126,52 +121,7 @@ enum atspi_requests {
 #define ATUSB_TO_DEV (USB_TYPE_VENDOR | USB_DIR_OUT)
 
 
-/* ----- Asynchronous control transfers ------------------------------------ */
-
-
-static int submit_control_msg(struct atusb_local *atusb,
-    __u8 request, __u8 requesttype, __u16 value, __u16 index,
-    void *data, __u16 size, usb_complete_t complete_fn, void *context,
-    struct urb **urb)
-{
-	struct usb_device *dev = atusb->udev;
-	struct usb_ctrlrequest *req;
-	int retval = -ENOMEM;
-
-	req = kmalloc(sizeof(struct usb_ctrlrequest), GFP_KERNEL);
-	if (!req)
-		return -ENOMEM;
-
-	req->bRequest = request;
-	req->bRequestType = requesttype;
-	req->wValue = cpu_to_le16(value);
-	req->wIndex = cpu_to_le16(index);
-	req->wLength = cpu_to_le16(size);
-
-	*urb = usb_alloc_urb(0, GFP_KERNEL);
-	if (!*urb)
-		goto out_nourb;
-
-	usb_fill_control_urb(*urb, dev,
-	    requesttype == ATUSB_FROM_DEV ?
-	      usb_rcvctrlpipe(dev, 0) : usb_sndctrlpipe(dev, 0),
-	    (unsigned char *) req, data, size, complete_fn, context);
-
-	retval = usb_submit_urb(*urb, GFP_KERNEL);
-	if (!retval)
-		return 0;
-	dev_warn(&dev->dev, "failed submitting urb, error %d", retval);
-	retval = retval == -ENOMEM ? retval : -EIO;
-
-	usb_free_urb(*urb);
-out_nourb:
-	kfree(req);
-
-	return retval;
-}
-
-
-/* ----- SPI transfers ----------------------------------------------------- */
+/* ----- USB commands without data ----------------------------------------- */
 
 
 static int atusb_command(struct atusb_local *atusb, uint8_t cmd, uint8_t arg)
@@ -278,7 +228,7 @@ static void atusb_in(struct urb *urb)
 		dev_dbg(&dev->dev, "atusb_in: frame is too small\n");
 		break;
 	default:
-		skb_trim(skb, len-2);
+		skb_trim(skb, len - 2); /* remove CRC */
 		ieee802154_rx_irqsafe(atusb->dev, skb, 0); /* @@@ lqi */
 		skb = atusb_alloc_skb(&dev->dev);
 		if (skb)
@@ -314,46 +264,24 @@ static int start_rx_urb(struct atusb_local *atusb)
 /* ----- IEEE 802.15.4 interface operations -------------------------------- */
 
 
-static void atusb_xmit_done(struct urb *urb)
-{
-	complete(urb->context);
-}
-
 static int atusb_xmit(struct ieee802154_dev *dev, struct sk_buff *skb)
 {
 	struct atusb_local *atusb = dev->priv;
-	DECLARE_COMPLETION_ONSTACK(enqueued);
-	struct urb *urb;
 	int retval;
 
-	if (atusb->tx_urb)
+	if (!completion_done(&atusb->tx_complete))
 		return -EBUSY;
-	/* @@@ RACE on atusb->tx_urb ! */
 	INIT_COMPLETION(atusb->tx_complete);
-	submit_control_msg(atusb, ATUSB_TX, ATUSB_TO_DEV,
-	    0, 0, skb->data, skb->len, atusb_xmit_done, &enqueued,
-	    &atusb->tx_urb);
-
-	retval = wait_for_completion_interruptible(&enqueued);
-	if (retval) {
-		/* @@@ clean up */
-		return -EINTR;
-	}
-	urb = atusb->tx_urb;
-	atusb->tx_urb = NULL;
-	if (urb->status) {
-		printk(KERN_WARNING "atusb_xmit: sending failed\n");
-		usb_free_urb(urb);
-		return -EIO;
+	retval = usb_control_msg(atusb->udev, usb_sndctrlpipe(atusb->udev, 0),
+	    ATUSB_TX, ATUSB_TO_DEV, 0, 0, skb->data, skb->len, 1000);
+	if (retval < 0) {
+		printk(KERN_WARNING "atusb_xmit: sending failed, error %d\n",
+		    retval);
+		return retval;
 	}
 
-	usb_free_urb(urb);
-
-	retval = wait_for_completion_interruptible(&atusb->tx_complete);
-	if (retval)
-		return -EINTR;
-
-	return 0;
+	return wait_for_completion_interruptible_timeout(&atusb->tx_complete,
+	    msecs_to_jiffies(1000));
 }
 
 static int atusb_channel(struct ieee802154_dev *dev, int page, int channel)
@@ -405,10 +333,6 @@ static void atusb_stop(struct ieee802154_dev *dev)
 {
 	struct atusb_local *atusb = dev->priv;
 
-	if (atusb->tx_urb) {
-		usb_kill_urb(atusb->tx_urb);
-		atusb->tx_urb = NULL;
-	}
 	if (atusb->rx_urb) {
 		usb_kill_urb(atusb->rx_urb);
 		atusb->rx_urb = NULL;
@@ -433,13 +357,14 @@ static struct ieee802154_ops atusb_ops = {
 static int atusb_get_and_show_revision(struct atusb_local *atusb)
 {
 	struct usb_device *dev = atusb->udev;
+	unsigned char buffer[3];
 	int retval;
 
 	/* Get a couple of the ATMega Firmware values */
 	retval = usb_control_msg(dev,
 	    usb_rcvctrlpipe(dev, 0),
 	    ATUSB_ID, ATUSB_FROM_DEV, 0, 0,
-	    atusb->buffer, 3, 1000);
+	    buffer, 3, 1000);
 	if (retval < 0) {
 		dev_info(&dev->dev,
 		    "failed submitting urb for ATUSB_ID, error %d\n", retval);
@@ -449,7 +374,7 @@ static int atusb_get_and_show_revision(struct atusb_local *atusb)
 
 	dev_info(&dev->dev,
 	    "Firmware: major: %u, minor: %u, hardware type: %u\n",
-	    atusb->buffer[0], atusb->buffer[1], atusb->buffer[2]);
+	    buffer[0], buffer[1], buffer[2]);
 
 	return 0;
 }
@@ -457,7 +382,7 @@ static int atusb_get_and_show_revision(struct atusb_local *atusb)
 static int atusb_get_and_show_build(struct atusb_local *atusb)
 {
 	struct usb_device *dev = atusb->udev;
-	char build[ATUSB_BUILD_SIZE+1];
+	char build[ATUSB_BUILD_SIZE + 1];
 	int retval;
 
 	retval = usb_control_msg(dev,
@@ -531,6 +456,8 @@ static int atusb_probe(struct usb_interface *interface,
 	atusb->udev = usb_get_dev(udev);
 	usb_set_intfdata(interface, atusb);
 
+	init_completion(&atusb->tx_complete);
+
 	dev->parent = &udev->dev;
 	dev->extra_tx_headroom = 0;
 	dev->phy->channels_supported[0] = 0x7FFF800;
@@ -571,8 +498,10 @@ static void atusb_disconnect(struct usb_interface *interface)
 	/* @@@ this needs some extra protecion - wa */
 	if (atusb->rx_urb)
 		usb_kill_urb(atusb->rx_urb);
+#if 0 /* @@@ check xmit synchronization */
 	if (atusb->tx_urb)
 		usb_kill_urb(atusb->tx_urb);
+#endif
 
 //	BUG_ON(timer_pending(&atusb->timer));
 
