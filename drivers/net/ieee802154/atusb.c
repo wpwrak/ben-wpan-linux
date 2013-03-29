@@ -25,7 +25,6 @@
  * To do:
  * - disentangle pointers between the various devices (USB, wpan, atusb)
  * - review/add locking of atusb_local
- * - avoid "dev" name
  * - harmonize indentation style
  * - check module load/unload
  * - review dev_* severity levels and error reporting in general
@@ -59,7 +58,7 @@
 
 #define ATUSB_BUILD_SIZE 256
 struct atusb_local {
-	struct ieee802154_dev *dev;
+	struct ieee802154_dev *wpan_dev;
 	struct usb_device *usb_dev;
 	/* The interface to the RF part info, if applicable */
 	struct urb *rx_urb;
@@ -218,24 +217,24 @@ static int submit_rx_urb(struct atusb_local *atusb,
 static void atusb_in(struct urb *urb)
 {
 	struct atusb_local *atusb = urb->context;
-	struct usb_device *dev = urb->dev;
+	struct usb_device *usb_dev = urb->dev;
 	struct sk_buff *skb = atusb->rx_skb;
 	uint8_t len, lqi;
 
-	dev_dbg(&dev->dev, "atusb_in: status %d len %d\n",
+	dev_dbg(&usb_dev->dev, "atusb_in: status %d len %d\n",
 	    urb->status, urb->actual_length);
 	if (urb->status) {
 		if (urb->status == -ENOENT) { /* being killed */
 			kfree_skb(skb);
 			return;
 		}
-		dev_dbg(&dev->dev, "atusb_in: URB error %d\n", urb->status);
+		dev_dbg(&usb_dev->dev, "atusb_in: URB error %d\n", urb->status);
 		goto recycle;
 	}
 
 	len = *skb->data;
 	if (!urb->actual_length || len+1 > urb->actual_length-1) {
-		dev_dbg(&dev->dev, "atusb_in: frame len %d+1 > URB %u-1\n",
+		dev_dbg(&usb_dev->dev, "atusb_in: frame len %d+1 > URB %u-1\n",
 		    len, urb->actual_length);
 		goto recycle;
 	}
@@ -245,15 +244,15 @@ static void atusb_in(struct urb *urb)
 		atusb_tx_done(atusb);
 		break;
 	case 1:
-		dev_dbg(&dev->dev, "atusb_in: frame is too small\n");
+		dev_dbg(&usb_dev->dev, "atusb_in: frame is too small\n");
 		break;
 	default:
 		lqi = skb->data[len+1];
-		dev_dbg(&dev->dev, "atusb_in: rx len %d lqi 0x%02x\n",
+		dev_dbg(&usb_dev->dev, "atusb_in: rx len %d lqi 0x%02x\n",
 		    len, lqi);
 		skb_trim(skb, len-2); /* remove CRC */
-		ieee802154_rx_irqsafe(atusb->dev, skb, lqi);
-		skb = atusb_alloc_skb(&dev->dev);
+		ieee802154_rx_irqsafe(atusb->wpan_dev, skb, lqi);
+		skb = atusb_alloc_skb(&usb_dev->dev);
 		if (!skb)
 			return;
 		break;
@@ -261,7 +260,7 @@ static void atusb_in(struct urb *urb)
 
 recycle:
 	if (submit_rx_urb(atusb, urb, skb) < 0)
-		dev_err(&dev->dev, "atusb_in: can't submit URB\n");
+		dev_err(&usb_dev->dev, "atusb_in: can't submit URB\n");
 }
 
 static int start_rx_urb(struct atusb_local *atusb)
@@ -287,9 +286,9 @@ static int start_rx_urb(struct atusb_local *atusb)
 /* ----- IEEE 802.15.4 interface operations -------------------------------- */
 
 
-static int atusb_xmit(struct ieee802154_dev *dev, struct sk_buff *skb)
+static int atusb_xmit(struct ieee802154_dev *wpan_dev, struct sk_buff *skb)
 {
-	struct atusb_local *atusb = dev->priv;
+	struct atusb_local *atusb = wpan_dev->priv;
 	struct usb_device *usb_dev = atusb->usb_dev;
 	int ret;
 
@@ -312,9 +311,9 @@ done:
 	return ret;
 }
 
-static int atusb_channel(struct ieee802154_dev *dev, int page, int channel)
+static int atusb_channel(struct ieee802154_dev *wpan_dev, int page, int channel)
 {
-	struct atusb_local *atusb = dev->priv;
+	struct atusb_local *atusb = wpan_dev->priv;
 	int ret;
 
 	if (page || channel < 11 || channel > 26) {
@@ -326,28 +325,28 @@ static int atusb_channel(struct ieee802154_dev *dev, int page, int channel)
 	if (ret < 0)
 		return ret;
 	msleep(1);	/* @@@ ugly synchronization */
-	dev->phy->current_channel = channel;
+	wpan_dev->phy->current_channel = channel;
 /* @@@ set CCA mode */
 	return 0;
 }
 
-static int atusb_ed(struct ieee802154_dev *dev, u8 *level)
+static int atusb_ed(struct ieee802154_dev *wpan_dev, u8 *level)
 {
 	/* @@@ not used by the stack yet */
 	*level = 0;
 	return 0;
 }
 
-static int atusb_set_hw_addr_filt(struct ieee802154_dev *dev,
+static int atusb_set_hw_addr_filt(struct ieee802154_dev *wpan_dev,
 				  struct ieee802154_hw_addr_filt *filt,
 				  unsigned long changed)
 {
 	return -EIO;
 }
 
-static int atusb_start(struct ieee802154_dev *dev)
+static int atusb_start(struct ieee802154_dev *wpan_dev)
 {
-	struct atusb_local *atusb = dev->priv;
+	struct atusb_local *atusb = wpan_dev->priv;
 	struct usb_device *usb_dev = atusb->usb_dev;
 	int ret;
 
@@ -361,9 +360,9 @@ static int atusb_start(struct ieee802154_dev *dev)
 	return ret;
 }
 
-static void atusb_stop(struct ieee802154_dev *dev)
+static void atusb_stop(struct ieee802154_dev *wpan_dev)
 {
-	struct atusb_local *atusb = dev->priv;
+	struct atusb_local *atusb = wpan_dev->priv;
 	struct usb_device *usb_dev = atusb->usb_dev;
 
 	dev_dbg(&usb_dev->dev, "atusb_stop\n");
@@ -473,16 +472,17 @@ static int atusb_probe(struct usb_interface *interface,
 		       const struct usb_device_id *id)
 {
 	struct usb_device *usb_dev = interface_to_usbdev(interface);
-	struct ieee802154_dev *dev;
+	struct ieee802154_dev *wpan_dev;
 	struct atusb_local *atusb = NULL;
 	int ret = -ENOMEM;
 
-	dev = ieee802154_alloc_device(sizeof(struct atusb_local), &atusb_ops);
-	if (!dev)
+	wpan_dev =
+	    ieee802154_alloc_device(sizeof(struct atusb_local), &atusb_ops);
+	if (!wpan_dev)
 		return -ENOMEM;
 
-	atusb = dev->priv;
-	atusb->dev = dev;
+	atusb = wpan_dev->priv;
+	atusb->wpan_dev = wpan_dev;
 	atusb->usb_dev = usb_get_dev(usb_dev);
 	usb_set_intfdata(interface, atusb);
 
@@ -492,13 +492,13 @@ static int atusb_probe(struct usb_interface *interface,
 	if (!atusb->rx_urb)
 		goto fail_nourb;
 
-	dev->parent = &usb_dev->dev;
-	dev->extra_tx_headroom = 0;
-	dev->flags = IEEE802154_HW_OMIT_CKSUM;
+	wpan_dev->parent = &usb_dev->dev;
+	wpan_dev->extra_tx_headroom = 0;
+	wpan_dev->flags = IEEE802154_HW_OMIT_CKSUM;
 
-	dev->phy->current_page = 0;
-	dev->phy->current_channel = 11;	/* reset default */
-	dev->phy->channels_supported[0] = 0x7FFF800;
+	wpan_dev->phy->current_page = 0;
+	wpan_dev->phy->current_channel = 11;	/* reset default */
+	wpan_dev->phy->channels_supported[0] = 0x7FFF800;
 
 	ret = atusb_command(atusb, ATUSB_RF_RESET, 0);
 	if (ret < 0) {
@@ -518,7 +518,7 @@ static int atusb_probe(struct usb_interface *interface,
 	if (ret)
 		goto fail;
 
-	ret = ieee802154_register_device(dev);
+	ret = ieee802154_register_device(wpan_dev);
 	if (ret)
 		goto fail;
 
@@ -537,12 +537,12 @@ static int atusb_probe(struct usb_interface *interface,
 		return 0;
 
 fail_registered:
-	ieee802154_unregister_device(dev);
+	ieee802154_unregister_device(wpan_dev);
 fail:
 	usb_free_urb(atusb->rx_urb);
 fail_nourb:
 	usb_put_dev(usb_dev);
-	ieee802154_free_device(dev);
+	ieee802154_free_device(wpan_dev);
 	return ret;
 }
 
@@ -553,12 +553,12 @@ static void atusb_disconnect(struct usb_interface *interface)
 	/* @@@ this needs some extra protecion - wa */
 	usb_kill_urb(atusb->rx_urb);
 
-	ieee802154_unregister_device(atusb->dev);
+	ieee802154_unregister_device(atusb->wpan_dev);
 
 	usb_free_urb(atusb->rx_urb);
 	/* @@@ do we need to check tx_sem here ? */
 
-	ieee802154_free_device(atusb->dev);
+	ieee802154_free_device(atusb->wpan_dev);
 
 	usb_set_intfdata(interface, NULL);
 	usb_put_dev(atusb->usb_dev);
