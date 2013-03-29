@@ -35,7 +35,6 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/jiffies.h>
-#include <linux/timer.h>
 #include <linux/interrupt.h>
 #include <linux/usb.h>
 #include <linux/skbuff.h>
@@ -163,6 +162,9 @@ static void atusb_in(struct urb *urb);
 
 static void atusb_tx_done(struct atusb_local *atusb)
 {
+	struct usb_device *dev = atusb->udev;
+
+	dev_dbg(&dev->dev, "atusb_tx_done\n");
 	complete(&atusb->tx_complete);
 }
 
@@ -205,6 +207,8 @@ static void atusb_in(struct urb *urb)
 	    usb_get_intfdata(to_usb_interface(&dev->dev));
 	uint8_t len;
 
+	dev_dbg(&dev->dev, "atusb_in: status %d len %d\n",
+	    urb->status, urb->actual_length);
 	if (urb->status) {
 		if (urb->status == -ENOENT) { /* being killed */
 			kfree_skb(skb);
@@ -215,6 +219,12 @@ static void atusb_in(struct urb *urb)
 	}
 
 	len = *skb->data;
+	if (!urb->actual_length || len + 1 > urb->actual_length) {
+		dev_dbg(&dev->dev, "atusb_in: frame len %d + 1 > URB %u\n",
+		    len, urb->actual_length);
+		goto recycle;
+	}
+
 	switch (len) {
 	case 0:
 		atusb_tx_done(atusb);
@@ -490,8 +500,6 @@ static void atusb_disconnect(struct usb_interface *interface)
 	if (atusb->tx_urb)
 		usb_kill_urb(atusb->tx_urb);
 #endif
-
-//	BUG_ON(timer_pending(&atusb->timer));
 
 	usb_set_intfdata(interface, NULL);
 	usb_put_dev(atusb->udev);
