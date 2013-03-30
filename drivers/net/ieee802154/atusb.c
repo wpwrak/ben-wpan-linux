@@ -169,7 +169,9 @@ static int atusb_read_reg(struct atusb_local *atusb, uint8_t reg)
 /* ----- Asynchronous USB -------------------------------------------------- */
 
 
-#define	MAX_PDU	128
+#define	MAX_PSDU	127
+#define	MAX_RX_XFER	(1+MAX_PSDU+2+1)	/* PHR+PSDU+CRC+LQI */
+
 
 static void atusb_in(struct urb *urb);
 
@@ -185,12 +187,12 @@ static struct sk_buff *atusb_alloc_skb(struct device *dev)
 {
 	struct sk_buff *skb;
 
-	skb = alloc_skb(MAX_PDU, GFP_KERNEL);
+	skb = alloc_skb(MAX_RX_XFER, GFP_KERNEL);
 	if (!skb) {
 		dev_err(dev, "atusb_in: can't allocate skb\n");
 		return NULL;
         }
-	skb_put(skb, MAX_PDU);
+	skb_put(skb, MAX_RX_XFER);
 	return skb;
 }
 
@@ -201,7 +203,7 @@ static int submit_rx_urb(struct atusb_local *atusb,
 	int ret;
 
 	usb_fill_bulk_urb(urb, usb_dev, usb_rcvbulkpipe(usb_dev, 1),
-	    skb->data, MAX_PDU, atusb_in, atusb);
+	    skb->data, MAX_RX_XFER, atusb_in, atusb);
 
 	atusb->rx_skb = skb;
 
@@ -250,7 +252,8 @@ static void atusb_in(struct urb *urb)
 		lqi = skb->data[len+1];
 		dev_dbg(&usb_dev->dev, "atusb_in: rx len %d lqi 0x%02x\n",
 		    len, lqi);
-		skb_trim(skb, len-2); /* remove CRC */
+		skb_pull(skb, 1);	/* remove PHR */
+		skb_trim(skb, len-2);	/* remove CRC */
 		ieee802154_rx_irqsafe(atusb->wpan_dev, skb, lqi);
 		skb = atusb_alloc_skb(&usb_dev->dev);
 		if (!skb)
