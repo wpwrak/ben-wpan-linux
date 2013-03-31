@@ -56,7 +56,8 @@
 
 #define	JEDEC_ATMEL	0x1f	/* JEDEC manufacturer ID */
 
-#define ATUSB_BUILD_SIZE 256
+#define ATUSB_BUILD_SIZE 256	/* maximum build version/date message length */
+
 struct atusb_local {
 	struct ieee802154_dev *wpan_dev;
 	struct usb_device *usb_dev;
