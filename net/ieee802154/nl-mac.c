@@ -327,6 +327,8 @@ static int ieee802154_associate_req(struct sk_buff *skb,
 	dev = ieee802154_nl_get_dev(info);
 	if (!dev)
 		return -ENODEV;
+	if (!ieee802154_mlme_ops(dev)->assoc_req)
+		return -EINVAL;
 
 	if (info->attrs[IEEE802154_ATTR_COORD_HW_ADDR]) {
 		addr.addr_type = IEEE802154_ADDR_LONG;
@@ -369,6 +371,8 @@ static int ieee802154_associate_resp(struct sk_buff *skb,
 	dev = ieee802154_nl_get_dev(info);
 	if (!dev)
 		return -ENODEV;
+	if (!ieee802154_mlme_ops(dev)->assoc_resp)
+		return -EINVAL;
 
 	addr.addr_type = IEEE802154_ADDR_LONG;
 	nla_memcpy(addr.hwaddr, info->attrs[IEEE802154_ATTR_DEST_HW_ADDR],
@@ -399,6 +403,8 @@ static int ieee802154_disassociate_req(struct sk_buff *skb,
 	dev = ieee802154_nl_get_dev(info);
 	if (!dev)
 		return -ENODEV;
+	if (!ieee802154_mlme_ops(dev)->disassoc_req)
+		return -EINVAL;
 
 	if (info->attrs[IEEE802154_ATTR_DEST_HW_ADDR]) {
 		addr.addr_type = IEEE802154_ADDR_LONG;
@@ -448,6 +454,8 @@ static int ieee802154_start_req(struct sk_buff *skb, struct genl_info *info)
 	dev = ieee802154_nl_get_dev(info);
 	if (!dev)
 		return -ENODEV;
+	if (!ieee802154_mlme_ops(dev)->start_req)
+		return -EINVAL;
 
 	addr.addr_type = IEEE802154_ADDR_SHORT;
 	addr.short_addr = nla_get_u16(
@@ -497,6 +505,8 @@ static int ieee802154_scan_req(struct sk_buff *skb, struct genl_info *info)
 	dev = ieee802154_nl_get_dev(info);
 	if (!dev)
 		return -ENODEV;
+	if (!ieee802154_mlme_ops(dev)->scan_req)
+		return -EINVAL;
 
 	type = nla_get_u8(info->attrs[IEEE802154_ATTR_SCAN_TYPE]);
 	channels = nla_get_u32(info->attrs[IEEE802154_ATTR_CHANNELS]);
