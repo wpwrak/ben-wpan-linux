@@ -24,7 +24,7 @@
 /*
  * To do:
  * - disentangle pointers between the various devices (USB, wpan, atusb)
- * - review/add locking of atusb_local
+ * - review/add locking of struct atusb
  * - harmonize indentation style
  * - check module load/unload
  * - review dev_* severity levels and error reporting in general
@@ -58,7 +58,7 @@
 
 #define ATUSB_BUILD_SIZE 256	/* maximum build version/date message length */
 
-struct atusb_local {
+struct atusb {
 	struct ieee802154_dev *wpan_dev;
 	struct usb_device *usb_dev;
 	struct delayed_work work;	/* memory allocations */
@@ -133,7 +133,7 @@ enum atspi_requests {
 /* ----- USB commands without data ----------------------------------------- */
 
 
-static int atusb_command(struct atusb_local *atusb, uint8_t cmd, uint8_t arg)
+static int atusb_command(struct atusb *atusb, uint8_t cmd, uint8_t arg)
 {
 	struct usb_device *usb_dev = atusb->usb_dev;
 
@@ -142,8 +142,7 @@ static int atusb_command(struct atusb_local *atusb, uint8_t cmd, uint8_t arg)
 	    cmd, ATUSB_TO_DEV, arg, 0, NULL, 0, 1000);
 }
 
-static int atusb_write_reg(struct atusb_local *atusb, uint8_t reg,
-    uint8_t value)
+static int atusb_write_reg(struct atusb *atusb, uint8_t reg, uint8_t value)
 {
 	struct usb_device *usb_dev = atusb->usb_dev;
 
@@ -153,7 +152,7 @@ static int atusb_write_reg(struct atusb_local *atusb, uint8_t reg,
 	    ATUSB_REG_WRITE, ATUSB_TO_DEV, value, reg, NULL, 0, 1000);
 }
 
-static int atusb_read_reg(struct atusb_local *atusb, uint8_t reg)
+static int atusb_read_reg(struct atusb *atusb, uint8_t reg)
 {
 	struct usb_device *usb_dev = atusb->usb_dev;
 	int ret;
@@ -175,11 +174,11 @@ static int atusb_read_reg(struct atusb_local *atusb, uint8_t reg)
 #define	MAX_RX_XFER	(1+MAX_PSDU+2+1)	/* PHR+PSDU+CRC+LQI */
 
 
-#define	SKB_ATUSB(skb)	(*(struct atusb_local **) (skb)->cb)
+#define	SKB_ATUSB(skb)	(*(struct atusb **) (skb)->cb)
 
 static void atusb_in(struct urb *urb);
 
-static int submit_rx_urb(struct atusb_local *atusb, struct urb *urb)
+static int submit_rx_urb(struct atusb *atusb, struct urb *urb)
 {
 	struct usb_device *usb_dev = atusb->usb_dev;
 	struct sk_buff *skb = urb->context;
@@ -211,8 +210,8 @@ static int submit_rx_urb(struct atusb_local *atusb, struct urb *urb)
 
 static void work_urbs(struct work_struct *work)
 {
-	struct atusb_local *atusb =
-	    container_of(to_delayed_work(work), struct atusb_local, work);
+	struct atusb *atusb =
+	    container_of(to_delayed_work(work), struct atusb, work);
 	struct usb_device *usb_dev = atusb->usb_dev;
 	struct urb *urb;
 
@@ -235,7 +234,7 @@ static void work_urbs(struct work_struct *work)
 /* ----- Asynchronous USB -------------------------------------------------- */
 
 
-static void atusb_tx_done(struct atusb_local *atusb)
+static void atusb_tx_done(struct atusb *atusb)
 {
 	struct usb_device *usb_dev = atusb->usb_dev;
 
@@ -247,7 +246,7 @@ static void atusb_in(struct urb *urb)
 {
 	struct usb_device *usb_dev = urb->dev;
 	struct sk_buff *skb = urb->context;
-	struct atusb_local *atusb = SKB_ATUSB(skb);
+	struct atusb *atusb = SKB_ATUSB(skb);
 	uint8_t len, lqi;
 
 	dev_dbg(&usb_dev->dev, "atusb_in: status %d len %d\n",
@@ -296,7 +295,7 @@ recycle:
 /* ----- URB allocation/deallocation --------------------------------------- */
 
 
-static void free_urbs(struct atusb_local *atusb)
+static void free_urbs(struct atusb *atusb)
 {
 	struct urb *urb;
 
@@ -310,7 +309,7 @@ static void free_urbs(struct atusb_local *atusb)
 	}
 }
 
-static int alloc_urbs(struct atusb_local *atusb, int n)
+static int alloc_urbs(struct atusb *atusb, int n)
 {
 	struct urb *urb;
 
@@ -332,7 +331,7 @@ static int alloc_urbs(struct atusb_local *atusb, int n)
 
 static int atusb_xmit(struct ieee802154_dev *wpan_dev, struct sk_buff *skb)
 {
-	struct atusb_local *atusb = wpan_dev->priv;
+	struct atusb *atusb = wpan_dev->priv;
 	struct usb_device *usb_dev = atusb->usb_dev;
 	int ret;
 
@@ -357,7 +356,7 @@ done:
 
 static int atusb_channel(struct ieee802154_dev *wpan_dev, int page, int channel)
 {
-	struct atusb_local *atusb = wpan_dev->priv;
+	struct atusb *atusb = wpan_dev->priv;
 	int ret;
 
 	if (page || channel < 11 || channel > 26) {
@@ -390,7 +389,7 @@ static int atusb_set_hw_addr_filt(struct ieee802154_dev *wpan_dev,
 
 static int atusb_start(struct ieee802154_dev *wpan_dev)
 {
-	struct atusb_local *atusb = wpan_dev->priv;
+	struct atusb *atusb = wpan_dev->priv;
 	struct usb_device *usb_dev = atusb->usb_dev;
 	int ret;
 
@@ -404,7 +403,7 @@ static int atusb_start(struct ieee802154_dev *wpan_dev)
 
 static void atusb_stop(struct ieee802154_dev *wpan_dev)
 {
-	struct atusb_local *atusb = wpan_dev->priv;
+	struct atusb *atusb = wpan_dev->priv;
 	struct usb_device *usb_dev = atusb->usb_dev;
 
 	dev_dbg(&usb_dev->dev, "atusb_stop\n");
@@ -426,7 +425,7 @@ static struct ieee802154_ops atusb_ops = {
 /* ----- Firmware and chip version information ----------------------------- */
 
 
-static int atusb_get_and_show_revision(struct atusb_local *atusb)
+static int atusb_get_and_show_revision(struct atusb *atusb)
 {
 	struct usb_device *usb_dev = atusb->usb_dev;
 	unsigned char buffer[3];
@@ -450,7 +449,7 @@ static int atusb_get_and_show_revision(struct atusb_local *atusb)
 	return 0;
 }
 
-static int atusb_get_and_show_build(struct atusb_local *atusb)
+static int atusb_get_and_show_build(struct atusb *atusb)
 {
 	struct usb_device *usb_dev = atusb->usb_dev;
 	char build[ATUSB_BUILD_SIZE+1];
@@ -473,7 +472,7 @@ static int atusb_get_and_show_build(struct atusb_local *atusb)
 	return 0;
 }
 
-static int atusb_get_and_show_chip(struct atusb_local *atusb)
+static int atusb_get_and_show_chip(struct atusb *atusb)
 {
 	struct usb_device *usb_dev = atusb->usb_dev;
 	int man_id_0, man_id_1, part_num, version_num;
@@ -515,11 +514,10 @@ static int atusb_probe(struct usb_interface *interface,
 {
 	struct usb_device *usb_dev = interface_to_usbdev(interface);
 	struct ieee802154_dev *wpan_dev;
-	struct atusb_local *atusb = NULL;
+	struct atusb *atusb = NULL;
 	int ret = -ENOMEM;
 
-	wpan_dev =
-	    ieee802154_alloc_device(sizeof(struct atusb_local), &atusb_ops);
+	wpan_dev = ieee802154_alloc_device(sizeof(struct atusb), &atusb_ops);
 	if (!wpan_dev)
 		return -ENOMEM;
 
@@ -593,7 +591,7 @@ fail:
 
 static void atusb_disconnect(struct usb_interface *interface)
 {
-	struct atusb_local *atusb = usb_get_intfdata(interface);
+	struct atusb *atusb = usb_get_intfdata(interface);
 
 	atusb->shutdown = 1;
 	cancel_delayed_work_sync(&atusb->work);
