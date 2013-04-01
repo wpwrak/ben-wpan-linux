@@ -17,7 +17,8 @@
 #define	_ATUSB_H
 
 #define ATUSB_VENDOR_ID	0x20b7	/* Qi Hardware*/
-#define ATUSB_PRODUCT_ID 0x1540	/* ATUSB */
+#define ATUSB_PRODUCT_ID 0x1540	/* 802.15.4, device 0 */
+				/*     -- -         - */
 
 #define ATUSB_BUILD_SIZE 256	/* maximum build version/date message length */
 
