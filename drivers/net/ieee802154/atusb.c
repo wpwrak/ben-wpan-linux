@@ -108,7 +108,7 @@ static int atusb_read_reg(struct atusb *atusb, uint8_t reg)
 
 
 #define	MAX_PSDU	127
-#define	MAX_RX_XFER	(1+MAX_PSDU+2+1)	/* PHR+PSDU+CRC+LQI */
+#define	MAX_RX_XFER	(1 + MAX_PSDU + 2 + 1)	/* PHR+PSDU+CRC+LQI */
 
 
 #define	SKB_ATUSB(skb)	(*(struct atusb **) (skb)->cb)
@@ -198,7 +198,7 @@ static void atusb_in_good(struct urb *urb)
 		return;
 	}
 
-	if (len+1 > urb->actual_length-1) {
+	if (len + 1 > urb->actual_length - 1) {
 		dev_dbg(&usb_dev->dev, "atusb_in: frame len %d+1 > URB %u-1\n",
 		    len, urb->actual_length);
 		return;
@@ -209,10 +209,10 @@ static void atusb_in_good(struct urb *urb)
 		return;
 	}
 
-	lqi = skb->data[len+1];
+	lqi = skb->data[len + 1];
 	dev_dbg(&usb_dev->dev, "atusb_in: rx len %d lqi 0x%02x\n", len, lqi);
 	skb_pull(skb, 1);	/* remove PHR */
-	skb_trim(skb, len-2);	/* remove CRC */
+	skb_trim(skb, len - 2);	/* remove CRC */
 	ieee802154_rx_irqsafe(atusb->wpan_dev, skb, lqi);
 	urb->context = NULL;	/* skb is gone */
 }
@@ -407,7 +407,7 @@ static int atusb_get_and_show_revision(struct atusb *atusb)
 static int atusb_get_and_show_build(struct atusb *atusb)
 {
 	struct usb_device *usb_dev = atusb->usb_dev;
-	char build[ATUSB_BUILD_SIZE+1];
+	char build[ATUSB_BUILD_SIZE + 1];
 	int ret;
 
 	ret = usb_control_msg(usb_dev,
