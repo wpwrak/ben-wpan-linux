@@ -242,12 +242,49 @@ static void atusb_tx_done(struct atusb *atusb)
 	complete(&atusb->tx_complete);
 }
 
-static void atusb_in(struct urb *urb)
+static void atusb_in_good(struct urb *urb)
 {
 	struct usb_device *usb_dev = urb->dev;
 	struct sk_buff *skb = urb->context;
 	struct atusb *atusb = SKB_ATUSB(skb);
 	uint8_t len, lqi;
+
+	if (!urb->actual_length) {
+		dev_dbg(&usb_dev->dev, "atusb_in: zero-sized URB ?\n");
+		return;
+	}
+
+	len = *skb->data;
+
+	if (urb->actual_length == 1 && !len) {
+		atusb_tx_done(atusb);
+		return;
+	}
+
+	if (len+1 > urb->actual_length-1) {
+		dev_dbg(&usb_dev->dev, "atusb_in: frame len %d+1 > URB %u-1\n",
+		    len, urb->actual_length);
+		return;
+	}
+
+	if (len < 3) {
+		dev_dbg(&usb_dev->dev, "atusb_in: frame is too small\n");
+		return;
+	}
+
+	lqi = skb->data[len+1];
+	dev_dbg(&usb_dev->dev, "atusb_in: rx len %d lqi 0x%02x\n", len, lqi);
+	skb_pull(skb, 1);	/* remove PHR */
+	skb_trim(skb, len-2);	/* remove CRC */
+	ieee802154_rx_irqsafe(atusb->wpan_dev, skb, lqi);
+	urb->context = NULL;	/* skb is gone */
+}
+
+static void atusb_in(struct urb *urb)
+{
+	struct usb_device *usb_dev = urb->dev;
+	struct sk_buff *skb = urb->context;
+	struct atusb *atusb = SKB_ATUSB(skb);
 
 	dev_dbg(&usb_dev->dev, "atusb_in: status %d len %d\n",
 	    urb->status, urb->actual_length);
@@ -258,44 +295,15 @@ static void atusb_in(struct urb *urb)
 			return;
 		}
 		dev_dbg(&usb_dev->dev, "atusb_in: URB error %d\n", urb->status);
-		goto recycle;
-	}
-
-	if (!urb->actual_length) {
-		dev_dbg(&usb_dev->dev, "atusb_in: zero-sized URB ?\n");
-		goto recycle;
-	}
-
-	len = *skb->data;
-
-	if (urb->actual_length == 1 && !len) {
-		atusb_tx_done(atusb);
-		goto recycle;
-	}
-
-	if (len+1 > urb->actual_length-1) {
-		dev_dbg(&usb_dev->dev, "atusb_in: frame len %d+1 > URB %u-1\n",
-		    len, urb->actual_length);
-		goto recycle;
-	}
-
-	if (len < 3) {
-		dev_dbg(&usb_dev->dev, "atusb_in: frame is too small\n");
 	} else {
-		lqi = skb->data[len+1];
-		dev_dbg(&usb_dev->dev, "atusb_in: rx len %d lqi 0x%02x\n",
-		    len, lqi);
-		skb_pull(skb, 1);	/* remove PHR */
-		skb_trim(skb, len-2);	/* remove CRC */
-		ieee802154_rx_irqsafe(atusb->wpan_dev, skb, lqi);
-		urb->context = NULL;	/* skb is gone */
+		atusb_in_good(urb);
 	}
 
-recycle:
 	usb_anchor_urb(urb, &atusb->idle_urbs);
 	if (!atusb->shutdown)
 		schedule_delayed_work(&atusb->work, 0);
 }
+
 
 /* ----- URB allocation/deallocation --------------------------------------- */
 
