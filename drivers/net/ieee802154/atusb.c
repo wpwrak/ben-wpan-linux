@@ -61,9 +61,10 @@
 struct atusb_local {
 	struct ieee802154_dev *wpan_dev;
 	struct usb_device *usb_dev;
-	/* The interface to the RF part info, if applicable */
-	struct urb *rx_urb;
-	struct sk_buff *rx_skb;
+	struct delayed_work work;	/* memory allocations */
+	struct usb_anchor idle_urbs;	/* URBs waiting to be submitted */
+	struct usb_anchor rx_urbs;	/* URBs waiting for reception */
+	int shutdown;			/* non-zero if shutting down */
 	struct semaphore tx_sem;
 	struct completion tx_complete;
 };
@@ -167,14 +168,72 @@ static int atusb_read_reg(struct atusb_local *atusb, uint8_t reg)
 }
 
 
-/* ----- Asynchronous USB -------------------------------------------------- */
+/* ----- skb allocation ---------------------------------------------------- */
 
 
 #define	MAX_PSDU	127
 #define	MAX_RX_XFER	(1+MAX_PSDU+2+1)	/* PHR+PSDU+CRC+LQI */
 
 
+#define	SKB_ATUSB(skb)	(*(struct atusb_local **) (skb)->cb)
+
 static void atusb_in(struct urb *urb);
+
+static int submit_rx_urb(struct atusb_local *atusb, struct urb *urb)
+{
+	struct usb_device *usb_dev = atusb->usb_dev;
+	struct sk_buff *skb = urb->context;
+	int ret;
+
+	if (!skb) {
+		skb = alloc_skb(MAX_RX_XFER, GFP_KERNEL);
+		if (!skb) {
+			dev_err(&usb_dev->dev,
+			    "atusb_in: can't allocate skb\n");
+			return -ENOMEM;
+		}
+		skb_put(skb, MAX_RX_XFER);
+		SKB_ATUSB(skb) = atusb;
+	}
+
+	usb_fill_bulk_urb(urb, usb_dev, usb_rcvbulkpipe(usb_dev, 1),
+	    skb->data, MAX_RX_XFER, atusb_in, skb);
+	usb_anchor_urb(urb, &atusb->rx_urbs);
+
+	ret = usb_submit_urb(urb, GFP_KERNEL);
+	if (ret) {
+		usb_unanchor_urb(urb);
+		kfree_skb(skb);
+		urb->context = NULL;
+	}
+	return ret;
+}
+
+static void work_urbs(struct work_struct *work)
+{
+	struct atusb_local *atusb =
+	    container_of(to_delayed_work(work), struct atusb_local, work);
+	struct usb_device *usb_dev = atusb->usb_dev;
+	struct urb *urb;
+
+	if (atusb->shutdown)
+		return;
+	while (1) {
+		urb = usb_get_from_anchor(&atusb->idle_urbs);
+		if (!urb)
+			return;
+		if (submit_rx_urb(atusb, urb))
+			break;
+	}
+	usb_anchor_urb(urb, &atusb->idle_urbs);
+	dev_err(&usb_dev->dev, "atusb_in: can't allocate/submit URB\n");
+	/* try again in one jiffie */
+	schedule_delayed_work(&atusb->work, 1);
+}
+
+
+/* ----- Asynchronous USB -------------------------------------------------- */
+
 
 static void atusb_tx_done(struct atusb_local *atusb)
 {
@@ -184,44 +243,11 @@ static void atusb_tx_done(struct atusb_local *atusb)
 	complete(&atusb->tx_complete);
 }
 
-static struct sk_buff *atusb_alloc_skb(struct device *dev)
-{
-	struct sk_buff *skb;
-
-	skb = alloc_skb(MAX_RX_XFER, GFP_KERNEL);
-	if (!skb) {
-		dev_err(dev, "atusb_in: can't allocate skb\n");
-		return NULL;
-        }
-	skb_put(skb, MAX_RX_XFER);
-	return skb;
-}
-
-static int submit_rx_urb(struct atusb_local *atusb,
-    struct urb *urb, struct sk_buff *skb)
-{
-	struct usb_device *usb_dev = atusb->usb_dev;
-	int ret;
-
-	usb_fill_bulk_urb(urb, usb_dev, usb_rcvbulkpipe(usb_dev, 1),
-	    skb->data, MAX_RX_XFER, atusb_in, atusb);
-
-	atusb->rx_skb = skb;
-
-	ret = usb_submit_urb(urb, GFP_KERNEL);
-	if (ret) {
-		kfree_skb(skb);
-		return ret;
-	}
-
-	return 0;
-}
-
 static void atusb_in(struct urb *urb)
 {
-	struct atusb_local *atusb = urb->context;
 	struct usb_device *usb_dev = urb->dev;
-	struct sk_buff *skb = atusb->rx_skb;
+	struct sk_buff *skb = urb->context;
+	struct atusb_local *atusb = SKB_ATUSB(skb);
 	uint8_t len, lqi;
 
 	dev_dbg(&usb_dev->dev, "atusb_in: status %d len %d\n",
@@ -229,6 +255,7 @@ static void atusb_in(struct urb *urb)
 	if (urb->status) {
 		if (urb->status == -ENOENT) { /* being killed */
 			kfree_skb(skb);
+			urb->context = NULL;
 			return;
 		}
 		dev_dbg(&usb_dev->dev, "atusb_in: URB error %d\n", urb->status);
@@ -256,34 +283,47 @@ static void atusb_in(struct urb *urb)
 		skb_pull(skb, 1);	/* remove PHR */
 		skb_trim(skb, len-2);	/* remove CRC */
 		ieee802154_rx_irqsafe(atusb->wpan_dev, skb, lqi);
-		skb = atusb_alloc_skb(&usb_dev->dev);
-		if (!skb)
-			return;
+		urb->context = NULL;	/* skb is gone */
 		break;
 	}
 
 recycle:
-	if (submit_rx_urb(atusb, urb, skb) < 0)
-		dev_err(&usb_dev->dev, "atusb_in: can't submit URB\n");
+	usb_anchor_urb(urb, &atusb->idle_urbs);
+	if (!atusb->shutdown)
+		schedule_delayed_work(&atusb->work, 0);
 }
 
-static int start_rx_urb(struct atusb_local *atusb)
+/* ----- URB allocation/deallocation --------------------------------------- */
+
+
+static void free_urbs(struct atusb_local *atusb)
 {
-	struct usb_device *usb_dev = atusb->usb_dev;
-	struct sk_buff *skb;
-	int ret;
+	struct urb *urb;
 
-	dev_dbg(&usb_dev->dev, "start_rx_urb\n");
-	skb = atusb_alloc_skb(&usb_dev->dev);
-	if (!skb)
-		return -ENOMEM;
+	while (1) {
+		urb = usb_get_from_anchor(&atusb->idle_urbs);
+		if (!urb)
+			break;
+		if (urb->context)
+			kfree_skb(urb->context);
+		usb_free_urb(urb);
+	}
+}
 
-	ret = submit_rx_urb(atusb, atusb->rx_urb, skb);
-	if (ret)
-		dev_err(&usb_dev->dev,
-		    "start_rx_urb: can't submit URB, error %d\n",
-		    ret);
-	return ret;
+static int alloc_urbs(struct atusb_local *atusb, int n)
+{
+	struct urb *urb;
+
+	while (n) {
+		urb = usb_alloc_urb(0, GFP_KERNEL);
+		if (!urb) {
+			free_urbs(atusb);
+			return -ENOMEM;
+		}
+		usb_anchor_urb(urb, &atusb->idle_urbs);
+		n--;
+	}
+	return 0;
 }
 
 
@@ -355,12 +395,10 @@ static int atusb_start(struct ieee802154_dev *wpan_dev)
 	int ret;
 
 	dev_dbg(&usb_dev->dev, "atusb_start\n");
-	ret = start_rx_urb(atusb);
-	if (ret)
-		return ret;
+	schedule_delayed_work(&atusb->work, 0);
 	ret = atusb_command(atusb, ATUSB_RX_MODE, 1);
 	if (ret < 0)
-		usb_kill_urb(atusb->rx_urb);
+		usb_kill_anchored_urbs(&atusb->idle_urbs);
 	return ret;
 }
 
@@ -370,7 +408,7 @@ static void atusb_stop(struct ieee802154_dev *wpan_dev)
 	struct usb_device *usb_dev = atusb->usb_dev;
 
 	dev_dbg(&usb_dev->dev, "atusb_stop\n");
-	usb_kill_urb(atusb->rx_urb);
+	usb_kill_anchored_urbs(&atusb->idle_urbs);
 	atusb_command(atusb, ATUSB_RX_MODE, 0);
 }
 
@@ -492,9 +530,13 @@ static int atusb_probe(struct usb_interface *interface,
 
 	init_completion(&atusb->tx_complete);
 	sema_init(&atusb->tx_sem, 1);
-	atusb->rx_urb = usb_alloc_urb(0, GFP_KERNEL);
-	if (!atusb->rx_urb)
-		goto fail_nourb;
+	init_usb_anchor(&atusb->idle_urbs);
+	init_usb_anchor(&atusb->rx_urbs);
+	INIT_DELAYED_WORK(&atusb->work, work_urbs);
+	atusb->shutdown = 0;
+
+	if (alloc_urbs(atusb, 1))
+		goto fail;
 
 	wpan_dev->parent = &usb_dev->dev;
 	wpan_dev->extra_tx_headroom = 0;
@@ -543,8 +585,7 @@ static int atusb_probe(struct usb_interface *interface,
 fail_registered:
 	ieee802154_unregister_device(wpan_dev);
 fail:
-	usb_free_urb(atusb->rx_urb);
-fail_nourb:
+	free_urbs(atusb);
 	usb_put_dev(usb_dev);
 	ieee802154_free_device(wpan_dev);
 	return ret;
@@ -554,13 +595,13 @@ static void atusb_disconnect(struct usb_interface *interface)
 {
 	struct atusb_local *atusb = usb_get_intfdata(interface);
 
-	/* @@@ this needs some extra protecion - wa */
-	usb_kill_urb(atusb->rx_urb);
+	atusb->shutdown = 1;
+	cancel_delayed_work_sync(&atusb->work);
+
+	usb_kill_anchored_urbs(&atusb->idle_urbs);
+	free_urbs(atusb);
 
 	ieee802154_unregister_device(atusb->wpan_dev);
-
-	usb_free_urb(atusb->rx_urb);
-	/* @@@ do we need to check tx_sem here ? */
 
 	ieee802154_free_device(atusb->wpan_dev);
 
