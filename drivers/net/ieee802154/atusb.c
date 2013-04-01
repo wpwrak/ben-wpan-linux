@@ -58,6 +58,8 @@
 
 #define ATUSB_BUILD_SIZE 256	/* maximum build version/date message length */
 
+#define	NUM_RX_URBS	4	/* allow for a bit of local latency */
+
 struct atusb {
 	struct ieee802154_dev *wpan_dev;
 	struct usb_device *usb_dev;
@@ -551,7 +553,7 @@ static int atusb_probe(struct usb_interface *interface,
 	INIT_DELAYED_WORK(&atusb->work, work_urbs);
 	atusb->shutdown = 0;
 
-	if (alloc_urbs(atusb, 1))
+	if (alloc_urbs(atusb, NUM_RX_URBS))
 		goto fail;
 
 	wpan_dev->parent = &usb_dev->dev;
