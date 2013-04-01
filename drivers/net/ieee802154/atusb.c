@@ -21,8 +21,7 @@
  * Copyright (c) 2013 Alexander Aring <alex.aring@gmail.com>
  */
 
-/*
- * To do:
+/* To do:
  * - disentangle pointers between the various devices (USB, wpan, atusb)
  * - review/add locking of struct atusb
  * - harmonize indentation style
@@ -522,8 +521,7 @@ static int atusb_probe(struct usb_interface *interface,
 	if (ret)
 		goto fail;
 
-	/*
-	 * If we just powered on, we're now in P_ON and need to enter TRX_OFF
+	/* If we just powered on, we're now in P_ON and need to enter TRX_OFF
 	 * explicitly. Any resets after that will send us straight to TRX_OFF,
 	 * making the command below redundant.
 	 */
