@@ -362,6 +362,11 @@ static int atusb_xmit(struct ieee802154_dev *wpan_dev, struct sk_buff *skb)
 
 	ret = wait_for_completion_interruptible_timeout(&atusb->tx_complete,
 	    msecs_to_jiffies(1000));
+	if (!ret)
+		ret = -ETIMEDOUT;
+	if (ret > 0)
+		ret = 0;
+
 done:
 	up(&atusb->tx_sem);
 	return ret;
