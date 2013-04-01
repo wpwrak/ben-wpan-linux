@@ -51,8 +51,8 @@
 #include "at86rf230.h"
 
 
-#define VENDOR_ID	0x20b7	/* Qi Hardware*/
-#define PRODUCT_ID	0x1540	/* ATUSB */
+#define ATUSB_VENDOR_ID	0x20b7	/* Qi Hardware*/
+#define ATUSB_PRODUCT_ID 0x1540	/* ATUSB */
 
 #define	JEDEC_ATMEL	0x1f	/* JEDEC manufacturer ID */
 
@@ -72,7 +72,7 @@ struct atusb {
 };
 
 /* Commands to our device. Make sure this is synced with the firmware */
-enum atspi_requests {
+enum atusb_requests {
 	ATUSB_ID			= 0x00,	/* system status/control grp */
 	ATUSB_BUILD,
 	ATUSB_RESET,
@@ -632,8 +632,8 @@ static const struct usb_device_id atusb_device_table[] = {
 {
 	.match_flags		= USB_DEVICE_ID_MATCH_DEVICE |
 				  USB_DEVICE_ID_MATCH_INT_INFO,
-	.idVendor		= VENDOR_ID,
-	.idProduct		= PRODUCT_ID,
+	.idVendor		= ATUSB_VENDOR_ID,
+	.idProduct		= ATUSB_PRODUCT_ID,
 	.bInterfaceClass	= USB_CLASS_VENDOR_SPEC
 },
 	/* end with null element */
