@@ -267,7 +267,7 @@ static void atusb_in_good(struct urb *urb)
 		return;
 	}
 
-	if (len < 3) {
+	if (len < 2) {
 		dev_dbg(&usb_dev->dev, "atusb_in: frame is too small\n");
 		return;
 	}
