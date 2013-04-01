@@ -67,6 +67,14 @@ struct atusb {
 	struct completion tx_complete;
 };
 
+/* at86rf230.h defines values as <reg, mask, shift> tuples. We use the more
+ * traditional style of having registers and or-able values. SR_VALUE uses
+ * the shift to prepare a value accordinly.
+ */
+
+#define	__SR_VALUE(reg, mask, shift, val)	((val) << (shift))
+#define	SR_VALUE(sr, val)			__SR_VALUE(sr, (val))
+
 
 /* ----- USB commands without data ----------------------------------------- */
 
@@ -531,6 +539,11 @@ static int atusb_probe(struct usb_interface *interface,
 	if (ret < 0)
 		goto fail_registered;
 	msleep(1);	/* reset => TRX_OFF, tTR13 = 37 us */
+
+	ret = atusb_write_reg(atusb, RG_TRX_CTRL_2,
+	    SR_VALUE(SR_RX_SAFE_MODE, 1));
+	if (ret < 0)
+		goto fail_registered;
 
 	ret = atusb_write_reg(atusb, RG_IRQ_MASK, 0xff);
 	if (ret >= 0)
