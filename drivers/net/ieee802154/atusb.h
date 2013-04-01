@@ -13,8 +13,8 @@
  * Firmware: ben-wpan/atusb/fw/include/atusb/atusb.h
  */
 
-#ifndef	ATUSB_H
-#define	ATUSB_H
+#ifndef	_ATUSB_H
+#define	_ATUSB_H
 
 #define ATUSB_VENDOR_ID	0x20b7	/* Qi Hardware*/
 #define ATUSB_PRODUCT_ID 0x1540	/* ATUSB */
@@ -78,7 +78,7 @@ enum atusb_requests {
  * host->	ATUSB_TX		flags		0	#bytes
  */
 
-#define ATUSB_FROM_DEV (USB_TYPE_VENDOR | USB_DIR_IN)
-#define ATUSB_TO_DEV (USB_TYPE_VENDOR | USB_DIR_OUT)
+#define ATUSB_REQ_FROM_DEV	(USB_TYPE_VENDOR | USB_DIR_IN)
+#define ATUSB_REQ_TO_DEV	(USB_TYPE_VENDOR | USB_DIR_OUT)
 
 #endif /* !_ATUSB_H */

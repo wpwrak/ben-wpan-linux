@@ -76,7 +76,7 @@ static int atusb_command(struct atusb *atusb, uint8_t cmd, uint8_t arg)
 
 	dev_dbg(&usb_dev->dev, "atusb_command: cmd = 0x%x\n", cmd);
 	return usb_control_msg(usb_dev, usb_sndctrlpipe(usb_dev, 0),
-	    cmd, ATUSB_TO_DEV, arg, 0, NULL, 0, 1000);
+	    cmd, ATUSB_REQ_TO_DEV, arg, 0, NULL, 0, 1000);
 }
 
 static int atusb_write_reg(struct atusb *atusb, uint8_t reg, uint8_t value)
@@ -86,7 +86,7 @@ static int atusb_write_reg(struct atusb *atusb, uint8_t reg, uint8_t value)
 	dev_dbg(&usb_dev->dev, "atusb_write_reg: 0x%02x <- 0x%02x\n",
 	    reg, value);
 	return usb_control_msg(usb_dev, usb_sndctrlpipe(usb_dev, 0),
-	    ATUSB_REG_WRITE, ATUSB_TO_DEV, value, reg, NULL, 0, 1000);
+	    ATUSB_REG_WRITE, ATUSB_REQ_TO_DEV, value, reg, NULL, 0, 1000);
 }
 
 static int atusb_read_reg(struct atusb *atusb, uint8_t reg)
@@ -97,7 +97,7 @@ static int atusb_read_reg(struct atusb *atusb, uint8_t reg)
 
 	dev_dbg(&usb_dev->dev, "atusb_read_reg: reg = 0x%x\n", reg);
 	ret = usb_control_msg(usb_dev, usb_rcvctrlpipe(usb_dev, 0),
-	    ATUSB_REG_READ, ATUSB_FROM_DEV, 0, reg, &value, 1, 1000);
+	    ATUSB_REG_READ, ATUSB_REQ_FROM_DEV, 0, reg, &value, 1, 1000);
 	if (ret < 0)
 		return ret;
 	return value;
@@ -290,7 +290,7 @@ static int atusb_xmit(struct ieee802154_dev *wpan_dev, struct sk_buff *skb)
 		return -EBUSY;
 	INIT_COMPLETION(atusb->tx_complete);
 	ret = usb_control_msg(usb_dev, usb_sndctrlpipe(usb_dev, 0),
-	    ATUSB_TX, ATUSB_TO_DEV, 0, 0, skb->data, skb->len, 1000);
+	    ATUSB_TX, ATUSB_REQ_TO_DEV, 0, 0, skb->data, skb->len, 1000);
 	if (ret < 0) {
 		printk(KERN_WARNING "atusb_xmit: sending failed, error %d\n",
 		    ret);
@@ -389,7 +389,7 @@ static int atusb_get_and_show_revision(struct atusb *atusb)
 	/* Get a couple of the ATMega Firmware values */
 	ret = usb_control_msg(usb_dev,
 	    usb_rcvctrlpipe(usb_dev, 0),
-	    ATUSB_ID, ATUSB_FROM_DEV, 0, 0,
+	    ATUSB_ID, ATUSB_REQ_FROM_DEV, 0, 0,
 	    buffer, 3, 1000);
 	if (ret < 0) {
 		dev_info(&usb_dev->dev,
@@ -412,7 +412,7 @@ static int atusb_get_and_show_build(struct atusb *atusb)
 
 	ret = usb_control_msg(usb_dev,
 	    usb_rcvctrlpipe(usb_dev, 0),
-	    ATUSB_BUILD, ATUSB_FROM_DEV, 0, 0,
+	    ATUSB_BUILD, ATUSB_REQ_FROM_DEV, 0, 0,
 	    build, ATUSB_BUILD_SIZE, 1000);
 	if (ret < 0) {
 		dev_err(&usb_dev->dev,
