@@ -55,6 +55,8 @@
 #define	JEDEC_ATMEL	0x1f	/* JEDEC manufacturer ID */
 
 #define	NUM_RX_URBS	4	/* allow for a bit of local latency */
+#define	ALLOC_DELAY_MS	100	/* delay after failed allocation */
+#define	TX_TIMEOUT_MS	200	/* on the air timeout */
 
 struct atusb {
 	struct ieee802154_dev *wpan_dev;
@@ -177,8 +179,8 @@ static void work_urbs(struct work_struct *work)
 	usb_anchor_urb(urb, &atusb->idle_urbs);
 	dev_err(&usb_dev->dev, "atusb_in: can't allocate/submit URB (%d)\n",
 	    ret);
-	/* try again in one jiffie */
-	schedule_delayed_work(&atusb->work, 1);
+	schedule_delayed_work(&atusb->work,
+	    msecs_to_jiffies(ALLOC_DELAY_MS) + 1);
 }
 
 
@@ -322,7 +324,7 @@ static int atusb_xmit(struct ieee802154_dev *wpan_dev, struct sk_buff *skb)
 	}
 
 	ret = wait_for_completion_interruptible_timeout(&atusb->tx_complete,
-	    msecs_to_jiffies(1000));
+	    msecs_to_jiffies(TX_TIMEOUT_MS));
 	if (!ret)
 		ret = -ETIMEDOUT;
 	if (ret > 0)
