@@ -54,8 +54,7 @@
 
 #define	JEDEC_ATMEL	0x1f	/* JEDEC manufacturer ID */
 
-//#define	NUM_RX_URBS	4	/* allow for a bit of local latency */
-#define	NUM_RX_URBS	1	/* allow for a bit of local latency */
+#define	NUM_RX_URBS	4	/* allow for a bit of local latency */
 
 struct atusb {
 	struct ieee802154_dev *wpan_dev;
@@ -167,7 +166,7 @@ static void work_urbs(struct work_struct *work)
 
 	if (atusb->shutdown)
 		return;
-msleep(1000);
+
 	do {
 		urb = usb_get_from_anchor(&atusb->idle_urbs);
 		if (!urb)
