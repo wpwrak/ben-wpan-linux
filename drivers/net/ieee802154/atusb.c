@@ -163,19 +163,21 @@ static void work_urbs(struct work_struct *work)
 	    container_of(to_delayed_work(work), struct atusb, work);
 	struct usb_device *usb_dev = atusb->usb_dev;
 	struct urb *urb;
+	int ret;
 
 	if (atusb->shutdown)
 		return;
 msleep(1000);
-	while (1) {
+	do {
 		urb = usb_get_from_anchor(&atusb->idle_urbs);
 		if (!urb)
 			return;
-		if (submit_rx_urb(atusb, urb))
-			break;
-	}
+		ret = submit_rx_urb(atusb, urb);
+	} while (!ret);
+
 	usb_anchor_urb(urb, &atusb->idle_urbs);
-	dev_err(&usb_dev->dev, "atusb_in: can't allocate/submit URB\n");
+	dev_err(&usb_dev->dev, "atusb_in: can't allocate/submit URB (%d)\n",
+	    ret);
 	/* try again in one jiffie */
 	schedule_delayed_work(&atusb->work, 1);
 }
@@ -581,10 +583,12 @@ static void atusb_disconnect(struct usb_interface *interface)
 {
 	struct atusb *atusb = usb_get_intfdata(interface);
 
+	dev_dbg(&atusb->usb_dev->dev, "atusb_disconnect\n");
+
 	atusb->shutdown = 1;
 	cancel_delayed_work_sync(&atusb->work);
 
-	usb_kill_anchored_urbs(&atusb->idle_urbs);
+	usb_kill_anchored_urbs(&atusb->rx_urbs);
 	free_urbs(atusb);
 
 	ieee802154_unregister_device(atusb->wpan_dev);
@@ -593,6 +597,8 @@ static void atusb_disconnect(struct usb_interface *interface)
 
 	usb_set_intfdata(interface, NULL);
 	usb_put_dev(atusb->usb_dev);
+
+	printk(KERN_DEBUG "atusb_disconnect done\n");
 }
 
 /* The devices we work with */
