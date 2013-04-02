@@ -76,7 +76,7 @@ enum atusb_requests {
  * ->host	ATUSB_SPI_WRITE2_SYNC	byte0		byte1	0/1
  *
  * host->	ATUSB_RX_MODE		on		-	0
- * host->	ATUSB_TX		flags		0	#bytes
+ * host->	ATUSB_TX		flags		ack_seq	#bytes
  */
 
 #define ATUSB_REQ_FROM_DEV	(USB_TYPE_VENDOR | USB_DIR_IN)

@@ -40,6 +40,7 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/jiffies.h>
+#include <linux/spinlock.h>
 #include <linux/semaphore.h>
 #include <linux/usb.h>
 #include <linux/skbuff.h>
@@ -62,9 +63,11 @@ struct atusb {
 	struct delayed_work work;	/* memory allocations */
 	struct usb_anchor idle_urbs;	/* URBs waiting to be submitted */
 	struct usb_anchor rx_urbs;	/* URBs waiting for reception */
+	spinlock_t lock;		/* protect tx_ack_seq */
 	int shutdown;			/* non-zero if shutting down */
 	struct semaphore tx_sem;
 	struct completion tx_complete;
+	uint8_t tx_ack_seq;		/* current TX ACK sequence number */
 };
 
 /* at86rf230.h defines values as <reg, mask, shift> tuples. We use the more
@@ -181,12 +184,18 @@ msleep(1000);
 /* ----- Asynchronous USB -------------------------------------------------- */
 
 
-static void atusb_tx_done(struct atusb *atusb)
+static void atusb_tx_done(struct atusb *atusb, uint8_t seq)
 {
 	struct usb_device *usb_dev = atusb->usb_dev;
+	uint8_t expect;
 
-	dev_dbg(&usb_dev->dev, "atusb_tx_done\n");
-	complete(&atusb->tx_complete);
+	spin_lock(&atusb->lock);
+	expect = atusb->tx_ack_seq;
+	spin_unlock(&atusb->lock);
+
+	dev_dbg(&usb_dev->dev, "atusb_tx_done (0x%02x/0x%02x)\n", seq, expect);
+	if (seq == expect)
+		complete(&atusb->tx_complete);
 }
 
 static void atusb_in_good(struct urb *urb)
@@ -203,8 +212,8 @@ static void atusb_in_good(struct urb *urb)
 
 	len = *skb->data;
 
-	if (urb->actual_length == 1 && !len) {
-		atusb_tx_done(atusb);
+	if (urb->actual_length == 1) {
+		atusb_tx_done(atusb, len);
 		return;
 	}
 
@@ -293,14 +302,18 @@ static int atusb_xmit(struct ieee802154_dev *wpan_dev, struct sk_buff *skb)
 {
 	struct atusb *atusb = wpan_dev->priv;
 	struct usb_device *usb_dev = atusb->usb_dev;
+	unsigned long flags;
 	int ret;
 
-	dev_dbg(&usb_dev->dev, "atusb_xmit\n");
-	if (down_trylock(&atusb->tx_sem))
+	dev_dbg(&usb_dev->dev, "atusb_xmit (%d)\n", skb->len);
+	if (down_trylock(&atusb->tx_sem)) {
+		dev_dbg(&usb_dev->dev, "atusb_xmit busy\n");
 		return -EBUSY;
+	}
 	INIT_COMPLETION(atusb->tx_complete);
 	ret = usb_control_msg(usb_dev, usb_sndctrlpipe(usb_dev, 0),
-	    ATUSB_TX, ATUSB_REQ_TO_DEV, 0, 0, skb->data, skb->len, 1000);
+	    ATUSB_TX, ATUSB_REQ_TO_DEV, 0, atusb->tx_ack_seq,
+	    skb->data, skb->len, 1000);
 	if (ret < 0) {
 		printk(KERN_WARNING "atusb_xmit: sending failed, error %d\n",
 		    ret);
@@ -315,7 +328,12 @@ static int atusb_xmit(struct ieee802154_dev *wpan_dev, struct sk_buff *skb)
 		ret = 0;
 
 done:
+	spin_lock_irqsave(&atusb->lock, flags);
+	atusb->tx_ack_seq++;
+	spin_unlock_irqrestore(&atusb->lock, flags);
+
 	up(&atusb->tx_sem);
+	dev_dbg(&usb_dev->dev, "atusb_xmit done (%d)\n", ret);
 	return ret;
 }
 
@@ -493,6 +511,7 @@ static int atusb_probe(struct usb_interface *interface,
 
 	init_completion(&atusb->tx_complete);
 	sema_init(&atusb->tx_sem, 1);
+	spin_lock_init(&atusb->lock);
 	init_usb_anchor(&atusb->idle_urbs);
 	init_usb_anchor(&atusb->rx_urbs);
 	INIT_DELAYED_WORK(&atusb->work, work_urbs);
