@@ -61,11 +61,15 @@
 struct atusb {
 	struct ieee802154_dev *wpan_dev;
 	struct usb_device *usb_dev;
+	int shutdown;			/* non-zero if shutting down */
+
+	/* RX variables */
 	struct delayed_work work;	/* memory allocations */
 	struct usb_anchor idle_urbs;	/* URBs waiting to be submitted */
 	struct usb_anchor rx_urbs;	/* URBs waiting for reception */
+
+	/* TX variables */
 	spinlock_t lock;		/* protect tx_ack_seq */
-	int shutdown;			/* non-zero if shutting down */
 	struct semaphore tx_sem;
 	struct completion tx_complete;
 	uint8_t tx_ack_seq;		/* current TX ACK sequence number */
@@ -512,13 +516,13 @@ static int atusb_probe(struct usb_interface *interface,
 	atusb->usb_dev = usb_get_dev(usb_dev);
 	usb_set_intfdata(interface, atusb);
 
-	init_completion(&atusb->tx_complete);
-	sema_init(&atusb->tx_sem, 1);
-	spin_lock_init(&atusb->lock);
+	atusb->shutdown = 0;
+	INIT_DELAYED_WORK(&atusb->work, work_urbs);
 	init_usb_anchor(&atusb->idle_urbs);
 	init_usb_anchor(&atusb->rx_urbs);
-	INIT_DELAYED_WORK(&atusb->work, work_urbs);
-	atusb->shutdown = 0;
+	spin_lock_init(&atusb->lock);
+	sema_init(&atusb->tx_sem, 1);
+	init_completion(&atusb->tx_complete);
 
 	if (alloc_urbs(atusb, NUM_RX_URBS))
 		goto fail;
