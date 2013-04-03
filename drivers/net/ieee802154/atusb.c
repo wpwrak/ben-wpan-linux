@@ -94,8 +94,8 @@ static int atusb_control_msg(struct atusb *atusb, unsigned int pipe,
 	if (ret < 0) {
 		atusb->err = ret;
 		dev_err(&usb_dev->dev,
-		        "atusb_control_msg: req 0x%02x val 0x%x idx 0x%x, error %d\n",
-		        request, value, index, ret);
+			"atusb_control_msg: req 0x%02x val 0x%x idx 0x%x, error %d\n",
+			request, value, index, ret);
 	}
 	return ret;
 }
@@ -433,11 +433,11 @@ static void atusb_stop(struct ieee802154_dev *wpan_dev)
 
 static struct ieee802154_ops atusb_ops = {
 	.owner			= THIS_MODULE,
-        .xmit			= atusb_xmit,
-        .ed			= atusb_ed,
-        .set_channel		= atusb_channel,
-        .start			= atusb_start,
-        .stop			= atusb_stop,
+	.xmit			= atusb_xmit,
+	.ed			= atusb_ed,
+	.set_channel		= atusb_channel,
+	.start			= atusb_start,
+	.stop			= atusb_stop,
 //	.set_hw_addr_filt	= atusb_set_hw_addr_filt,
 };
 
@@ -589,7 +589,7 @@ static int atusb_probe(struct usb_interface *interface,
 	dev_err(&atusb->usb_dev->dev,
 		"%s: setup failed, error = %d\n",
 		__func__, ret);
-	
+
 	ieee802154_unregister_device(wpan_dev);
 fail:
 	free_urbs(atusb);
@@ -617,7 +617,7 @@ static void atusb_disconnect(struct usb_interface *interface)
 	usb_set_intfdata(interface, NULL);
 	usb_put_dev(atusb->usb_dev);
 
-	printk(KERN_DEBUG "atusb_disconnect done\n");
+	pr_debug("atusb_disconnect done\n");
 }
 
 /* The devices we work with */
