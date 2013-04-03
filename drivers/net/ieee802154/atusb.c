@@ -27,7 +27,6 @@
  * - harmonize indentation style
  * - check module load/unload
  * - review dev_* severity levels and error reporting in general
- * - buffer protection (we should need only dynamic)
  * - AACK mode (needs firmware support)
  * - address filtering
  * - Q: move more severe on/off operation into start/stop ? e.g., reset
@@ -354,12 +353,16 @@ static int atusb_channel(struct ieee802154_dev *wpan_dev, int page, int channel)
 		    "invalid channel: page %d channel %d\n", page, channel);
 		return -EINVAL;
 	}
+
+	/* This implicitly sets the CCA (Clear Channel Assessment) mode to 0,
+	 * "Mode 3a, Carrier sense OR energy above threshold".
+	 * We should probably make this configurable. @@@
+	 */
 	ret = atusb_write_reg(atusb, RG_PHY_CC_CCA, channel);
 	if (ret < 0)
 		return ret;
 	msleep(1);	/* @@@ ugly synchronization */
 	wpan_dev->phy->current_channel = channel;
-/* @@@ set CCA mode */
 	return 0;
 }
 
