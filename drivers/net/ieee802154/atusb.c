@@ -64,9 +64,12 @@ struct atusb {
 };
 
 /* at86rf230.h defines values as <reg, mask, shift> tuples. We use the more
- * traditional style of having registers and or-able values. SR_VALUE uses
- * the shift to prepare a value accordinly.
+ * traditional style of having registers and or-able values. SR_REG extracts
+ * the register number. SR_VALUE uses the shift to prepare a value accordingly.
  */
+
+#define	__SR_REG(reg, mask, shift)	(reg)
+#define	SR_REG(sr)			__SR_REG(sr)
 
 #define	__SR_VALUE(reg, mask, shift, val)	((val) << (shift))
 #define	SR_VALUE(sr, val)			__SR_VALUE(sr, (val))
@@ -579,7 +582,8 @@ static int atusb_probe(struct usb_interface *interface,
 	atusb_write_reg(atusb, RG_TRX_STATE, STATE_FORCE_TRX_OFF);
 	msleep(1);	/* reset => TRX_OFF, tTR13 = 37 us */
 
-	atusb_write_reg(atusb, RG_TRX_CTRL_2, SR_VALUE(SR_RX_SAFE_MODE, 1));
+	atusb_write_reg(atusb,
+			SR_REG(SR_RX_SAFE_MODE), SR_VALUE(SR_RX_SAFE_MODE, 1));
 	atusb_write_reg(atusb, RG_IRQ_MASK, 0xff);
 
 	ret = get_and_clear_error(atusb);
