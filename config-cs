@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/x86 3.9.0-rc4 Kernel Configuration
+# Linux/x86 3.9.0-rc5 Kernel Configuration
 #
 CONFIG_64BIT=y
 CONFIG_X86_64=y
@@ -1337,6 +1337,7 @@ CONFIG_DEVKMEM=y
 # Serial drivers
 #
 CONFIG_SERIAL_8250=y
+CONFIG_SERIAL_8250_DEPRECATED_OPTIONS=y
 CONFIG_SERIAL_8250_PNP=y
 CONFIG_SERIAL_8250_CONSOLE=y
 CONFIG_FIX_EARLYCON_MEM=y
