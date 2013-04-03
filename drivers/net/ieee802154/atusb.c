@@ -21,18 +21,6 @@
  * Copyright (c) 2013 Alexander Aring <alex.aring@gmail.com>
  */
 
-/* To do:
- * - disentangle pointers between the various devices (USB, wpan, atusb)
- * - review/add locking of struct atusb
- * - harmonize indentation style
- * - check module load/unload
- * - review dev_* severity levels and error reporting in general
- * - AACK mode (needs firmware support)
- * - address filtering
- * - Q: move more severe on/off operation into start/stop ? e.g., reset
- * - think about setting power levels
- */
-
 #define	DEBUG
 
 #include <linux/kernel.h>
