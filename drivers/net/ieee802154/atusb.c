@@ -174,7 +174,7 @@ static int submit_rx_urb(struct atusb *atusb, struct urb *urb)
 	if (!skb) {
 		skb = alloc_skb(MAX_RX_XFER, GFP_KERNEL);
 		if (!skb) {
-			dev_err(&usb_dev->dev,
+			dev_warn_ratelimited(&usb_dev->dev,
 			    "atusb_in: can't allocate skb\n");
 			return -ENOMEM;
 		}
@@ -214,7 +214,8 @@ static void work_urbs(struct work_struct *work)
 	} while (!ret);
 
 	usb_anchor_urb(urb, &atusb->idle_urbs);
-	dev_err(&usb_dev->dev, "atusb_in: can't allocate/submit URB (%d)\n",
+	dev_warn_ratelimited(&usb_dev->dev,
+	    "atusb_in: can't allocate/submit URB (%d)\n",
 	    ret);
 	schedule_delayed_work(&atusb->work,
 	    msecs_to_jiffies(ALLOC_DELAY_MS) + 1);
@@ -383,7 +384,7 @@ static int atusb_channel(struct ieee802154_dev *wpan_dev, int page, int channel)
 	int ret;
 
 	if (page || channel < 11 || channel > 26) {
-		dev_err(&atusb->usb_dev->dev,
+		dev_warn(&atusb->usb_dev->dev,
 		    "invalid channel: page %d channel %d\n", page, channel);
 		return -EINVAL;
 	}
