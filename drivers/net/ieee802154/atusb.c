@@ -61,6 +61,7 @@ struct atusb {
 	struct ieee802154_dev *wpan_dev;
 	struct usb_device *usb_dev;
 	int shutdown;			/* non-zero if shutting down */
+	int err;			/* set by first error */
 
 	/* RX variables */
 	struct delayed_work work;	/* memory allocations */
@@ -85,13 +86,39 @@ struct atusb {
 
 /* ----- USB commands without data ----------------------------------------- */
 
+/* To reduce the number of error checks in the code, we record the first error
+ * in atusb->err and reject all subsequent requests until the error is cleared.
+ */
+
+static int atusb_control_msg(struct atusb *atusb, unsigned int pipe,
+        __u8 request, __u8 requesttype, __u16 value, __u16 index,
+        void *data, __u16 size, int timeout)
+{
+	struct usb_device *usb_dev = atusb->usb_dev;
+	int ret;
+
+	if (atusb->err)
+		return atusb->err;
+
+	ret = usb_control_msg(usb_dev, pipe, request, requesttype,
+	    value, index, data, size, timeout);
+	if (ret < 0) {
+		atusb->err = ret;
+		dev_err(&usb_dev->dev,
+		    "atusb_control_msg: req 0x%02x val 0x%x idx 0x%x, "
+		    "error %d\n",
+		    request, value, index, ret);
+	}
+	return ret;
+}
+
 
 static int atusb_command(struct atusb *atusb, uint8_t cmd, uint8_t arg)
 {
 	struct usb_device *usb_dev = atusb->usb_dev;
 
 	dev_dbg(&usb_dev->dev, "atusb_command: cmd = 0x%x\n", cmd);
-	return usb_control_msg(usb_dev, usb_sndctrlpipe(usb_dev, 0),
+	return atusb_control_msg(atusb, usb_sndctrlpipe(usb_dev, 0),
 	    cmd, ATUSB_REQ_TO_DEV, arg, 0, NULL, 0, 1000);
 }
 
@@ -101,7 +128,7 @@ static int atusb_write_reg(struct atusb *atusb, uint8_t reg, uint8_t value)
 
 	dev_dbg(&usb_dev->dev, "atusb_write_reg: 0x%02x <- 0x%02x\n",
 	    reg, value);
-	return usb_control_msg(usb_dev, usb_sndctrlpipe(usb_dev, 0),
+	return atusb_control_msg(atusb, usb_sndctrlpipe(usb_dev, 0),
 	    ATUSB_REG_WRITE, ATUSB_REQ_TO_DEV, value, reg, NULL, 0, 1000);
 }
 
@@ -111,12 +138,19 @@ static int atusb_read_reg(struct atusb *atusb, uint8_t reg)
 	int ret;
 	uint8_t value;
 
-	dev_dbg(&usb_dev->dev, "atusb_read_reg: reg = 0x%x\n", reg);
-	ret = usb_control_msg(usb_dev, usb_rcvctrlpipe(usb_dev, 0),
+	dev_dbg(&usb_dev->dev, "atusb: reg = 0x%x\n", reg);
+	ret = atusb_control_msg(atusb, usb_rcvctrlpipe(usb_dev, 0),
 	    ATUSB_REG_READ, ATUSB_REQ_FROM_DEV, 0, reg, &value, 1, 1000);
-	if (ret < 0)
-		return ret;
-	return value;
+	return ret >= 0 ? value : ret;
+}
+
+
+static int get_and_clear_error(struct atusb *atusb)
+{
+	int err = atusb->err;
+
+	atusb->err = 0;
+	return err;
 }
 
 
@@ -388,7 +422,8 @@ static int atusb_start(struct ieee802154_dev *wpan_dev)
 
 	dev_dbg(&usb_dev->dev, "atusb_start\n");
 	schedule_delayed_work(&atusb->work, 0);
-	ret = atusb_command(atusb, ATUSB_RX_MODE, 1);
+	atusb_command(atusb, ATUSB_RX_MODE, 1);
+	ret = get_and_clear_error(atusb);
 	if (ret < 0)
 		usb_kill_anchored_urbs(&atusb->idle_urbs);
 	return ret;
@@ -402,6 +437,7 @@ static void atusb_stop(struct ieee802154_dev *wpan_dev)
 	dev_dbg(&usb_dev->dev, "atusb_stop\n");
 	usb_kill_anchored_urbs(&atusb->idle_urbs);
 	atusb_command(atusb, ATUSB_RX_MODE, 0);
+	get_and_clear_error(atusb);
 }
 
 static struct ieee802154_ops atusb_ops = {
@@ -425,21 +461,16 @@ static int atusb_get_and_show_revision(struct atusb *atusb)
 	int ret;
 
 	/* Get a couple of the ATMega Firmware values */
-	ret = usb_control_msg(usb_dev,
+	ret = atusb_control_msg(atusb,
 	    usb_rcvctrlpipe(usb_dev, 0),
 	    ATUSB_ID, ATUSB_REQ_FROM_DEV, 0, 0,
 	    buffer, 3, 1000);
-	if (ret < 0) {
+	if (ret >= 0)
 		dev_info(&usb_dev->dev,
-		    "failed submitting urb for ATUSB_ID, error %d\n", ret);
-		return ret == -ENOMEM ? ret : -EIO;
-	}
+		    "Firmware: major: %u, minor: %u, hardware type: %u\n",
+		    buffer[0], buffer[1], buffer[2]);
 
-	dev_info(&usb_dev->dev,
-	    "Firmware: major: %u, minor: %u, hardware type: %u\n",
-	    buffer[0], buffer[1], buffer[2]);
-
-	return 0;
+	return ret;
 }
 
 static int atusb_get_and_show_build(struct atusb *atusb)
@@ -448,54 +479,51 @@ static int atusb_get_and_show_build(struct atusb *atusb)
 	char build[ATUSB_BUILD_SIZE + 1];
 	int ret;
 
-	ret = usb_control_msg(usb_dev,
+	ret = atusb_control_msg(atusb,
 	    usb_rcvctrlpipe(usb_dev, 0),
 	    ATUSB_BUILD, ATUSB_REQ_FROM_DEV, 0, 0,
 	    build, ATUSB_BUILD_SIZE, 1000);
-	if (ret < 0) {
-		dev_err(&usb_dev->dev,
-		    "failed submitting urb for ATUSB_BUILD, error %d\n",
-		    ret);
-		return ret == -ENOMEM ? ret : -EIO;
+	if (ret >= 0) {
+		build[ret] = 0;
+		dev_info(&usb_dev->dev, "Firmware: build %s\n", build);
 	}
 
-	build[ret] = 0;
-	dev_info(&usb_dev->dev, "Firmware: build %s\n", build);
-
-	return 0;
+	return ret;
 }
 
 static int atusb_get_and_show_chip(struct atusb *atusb)
 {
 	struct usb_device *usb_dev = atusb->usb_dev;
-	int man_id_0, man_id_1, part_num, version_num;
+	uint8_t man_id_0, man_id_1, part_num, version_num;
 
 	man_id_0 = atusb_read_reg(atusb, RG_MAN_ID_0);
 	man_id_1 = atusb_read_reg(atusb, RG_MAN_ID_1);
 	part_num = atusb_read_reg(atusb, RG_PART_NUM);
 	version_num = atusb_read_reg(atusb, RG_VERSION_NUM);
 
-	if (man_id_0 < 0 || man_id_1 < 0 || part_num < 0 || version_num < 0) {
-		dev_err(&usb_dev->dev, "can't read chip ID\n");
-		return -EIO;
-	}
+	if (atusb->err)
+		return atusb->err;
 
 	if ((man_id_1 << 8 | man_id_0) != JEDEC_ATMEL) {
 		dev_err(&usb_dev->dev,
 		    "non-Atmel transceiver xxxx%02x%02x\n",
 		    man_id_1, man_id_0);
-		return -ENODEV;
+		goto fail;
 	}
 	if (part_num != 3) {
 		dev_err(&usb_dev->dev,
 		    "unexpected transceiver, part 0x%02x version 0x%02x\n",
 		    part_num, version_num);
-		return -ENODEV;
+		goto fail;
 	}
 
 	dev_info(&usb_dev->dev, "ATUSB: AT86RF231 version %d\n", version_num);
 
 	return 0;
+
+fail:
+	atusb->err = -ENODEV;
+	return -ENODEV;
 }
 
 
@@ -520,6 +548,7 @@ static int atusb_probe(struct usb_interface *interface,
 	usb_set_intfdata(interface, atusb);
 
 	atusb->shutdown = 0;
+	atusb->err = 0;
 	INIT_DELAYED_WORK(&atusb->work, work_urbs);
 	init_usb_anchor(&atusb->idle_urbs);
 	init_usb_anchor(&atusb->rx_urbs);
@@ -538,23 +567,17 @@ static int atusb_probe(struct usb_interface *interface,
 	wpan_dev->phy->current_channel = 11;	/* reset default */
 	wpan_dev->phy->channels_supported[0] = 0x7FFF800;
 
-	ret = atusb_command(atusb, ATUSB_RF_RESET, 0);
-	if (ret < 0) {
+	atusb_command(atusb, ATUSB_RF_RESET, 0);
+	atusb_get_and_show_chip(atusb);
+	atusb_get_and_show_revision(atusb);
+	atusb_get_and_show_build(atusb);
+	ret = get_and_clear_error(atusb);
+	if (ret) {
 		dev_err(&atusb->usb_dev->dev,
-			"%s: reset failed, error = %d\n",
+			"%s: initialization failed, error = %d\n",
 			__func__, ret);
 		goto fail;
 	}
-
-	ret = atusb_get_and_show_chip(atusb);
-	if (ret)
-		goto fail;
-	ret = atusb_get_and_show_revision(atusb);
-	if (ret)
-		goto fail;
-	ret = atusb_get_and_show_build(atusb);
-	if (ret)
-		goto fail;
 
 	ret = ieee802154_register_device(wpan_dev);
 	if (ret)
@@ -564,21 +587,20 @@ static int atusb_probe(struct usb_interface *interface,
 	 * explicitly. Any resets after that will send us straight to TRX_OFF,
 	 * making the command below redundant.
 	 */
-	ret = atusb_write_reg(atusb, RG_TRX_STATE, STATE_FORCE_TRX_OFF);
-	if (ret < 0)
-		goto fail_registered;
+	atusb_write_reg(atusb, RG_TRX_STATE, STATE_FORCE_TRX_OFF);
 	msleep(1);	/* reset => TRX_OFF, tTR13 = 37 us */
 
-	ret = atusb_write_reg(atusb, RG_TRX_CTRL_2,
-	    SR_VALUE(SR_RX_SAFE_MODE, 1));
-	if (ret < 0)
-		goto fail_registered;
+	atusb_write_reg(atusb, RG_TRX_CTRL_2, SR_VALUE(SR_RX_SAFE_MODE, 1));
+	atusb_write_reg(atusb, RG_IRQ_MASK, 0xff);
 
-	ret = atusb_write_reg(atusb, RG_IRQ_MASK, 0xff);
-	if (ret >= 0)
+	ret = get_and_clear_error(atusb);
+	if (!ret)
 		return 0;
 
-fail_registered:
+	dev_err(&atusb->usb_dev->dev,
+		"%s: setup failed, error = %d\n",
+		__func__, ret);
+	
 	ieee802154_unregister_device(wpan_dev);
 fail:
 	free_urbs(atusb);
