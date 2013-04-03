@@ -344,8 +344,8 @@ static int atusb_xmit(struct ieee802154_dev *wpan_dev, struct sk_buff *skb)
 	    ATUSB_TX, ATUSB_REQ_TO_DEV, 0, atusb->tx_ack_seq,
 	    skb->data, skb->len, 1000);
 	if (ret < 0) {
-		printk(KERN_WARNING "atusb_xmit: sending failed, error %d\n",
-		    ret);
+		dev_warn_ratelimited(&usb_dev->dev,
+		    "ATUSB_TX failed, error %d\n", ret);
 		goto done;
 	}
 
