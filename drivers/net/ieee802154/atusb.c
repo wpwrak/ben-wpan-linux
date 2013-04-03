@@ -405,7 +405,46 @@ static int atusb_set_hw_addr_filt(struct ieee802154_dev *wpan_dev,
 				  struct ieee802154_hw_addr_filt *filt,
 				  unsigned long changed)
 {
-	return -EIO;
+	struct atusb *atusb = wpan_dev->priv;
+	struct device *dev = &atusb->usb_dev->dev;
+	uint8_t reg;
+
+	if (changed & IEEE802515_AFILT_SADDR_CHANGED) {
+		dev_vdbg(dev, "atusb_set_hw_addr_filt called for saddr\n");
+		atusb_write_reg(atusb, RG_SHORT_ADDR_0, filt->short_addr);
+		atusb_write_reg(atusb, RG_SHORT_ADDR_1, filt->short_addr >> 8);
+	}
+
+	if (changed & IEEE802515_AFILT_PANID_CHANGED) {
+		dev_vdbg(dev, "atusb_set_hw_addr_filt called for pan id\n");
+		atusb_write_reg(atusb, RG_PAN_ID_0, filt->pan_id);
+		atusb_write_reg(atusb, RG_PAN_ID_1, filt->pan_id >> 8);
+	}
+
+	if (changed & IEEE802515_AFILT_IEEEADDR_CHANGED) {
+		dev_vdbg(dev, "atusb_set_hw_addr_filt called for IEEE addr\n");
+		atusb_write_reg(atusb, RG_IEEE_ADDR_0, filt->ieee_addr[7]);
+		atusb_write_reg(atusb, RG_IEEE_ADDR_1, filt->ieee_addr[6]);
+		atusb_write_reg(atusb, RG_IEEE_ADDR_2, filt->ieee_addr[5]);
+		atusb_write_reg(atusb, RG_IEEE_ADDR_3, filt->ieee_addr[4]);
+		atusb_write_reg(atusb, RG_IEEE_ADDR_4, filt->ieee_addr[3]);
+		atusb_write_reg(atusb, RG_IEEE_ADDR_5, filt->ieee_addr[2]);
+		atusb_write_reg(atusb, RG_IEEE_ADDR_6, filt->ieee_addr[1]);
+		atusb_write_reg(atusb, RG_IEEE_ADDR_7, filt->ieee_addr[0]);
+	}
+
+	if (changed & IEEE802515_AFILT_PANC_CHANGED) {
+		dev_vdbg(dev,
+			 "atusb_set_hw_addr_filt called for panc change\n");
+		reg = atusb_read_reg(atusb, SR_REG(SR_AACK_I_AM_COORD));
+		if (filt->pan_coord)
+			reg |= SR_VALUE(SR_AACK_I_AM_COORD, 1);
+		else
+			reg &= ~SR_VALUE(SR_AACK_I_AM_COORD, 1);
+		atusb_write_reg(atusb, SR_REG(SR_AACK_I_AM_COORD), reg);
+	}
+
+	return get_and_clear_error(atusb);
 }
 
 static int atusb_start(struct ieee802154_dev *wpan_dev)
@@ -441,7 +480,7 @@ static struct ieee802154_ops atusb_ops = {
 	.set_channel		= atusb_channel,
 	.start			= atusb_start,
 	.stop			= atusb_stop,
-//	.set_hw_addr_filt	= atusb_set_hw_addr_filt,
+	.set_hw_addr_filt	= atusb_set_hw_addr_filt,
 };
 
 
