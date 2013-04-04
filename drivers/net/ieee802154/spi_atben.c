@@ -33,6 +33,7 @@ enum {
 #define	PDPIN	(prv->regs)
 #define	PDDATS	(prv->regs+0x14)
 #define	PDDATC	(prv->regs+0x18)
+#define	PDFUNC	(prv->regs+0x48)
 
 
 struct atben_prv {
@@ -220,6 +221,7 @@ static int atben_transfer(struct spi_device *spi, struct spi_message *msg)
 
 static int atben_setup(struct spi_device *spi)
 {
+	dev_dbg(&spi->dev, "atben_setup\n");
 	return 0;
 }
 
@@ -285,6 +287,8 @@ static int atben_probe(struct platform_device *pdev)
 		dev_err(prv->dev, "can't ioremap\n");
 		goto out_ioarea;
 	}
+
+	writel(nSEL | MOSI | MISO | SCLK | SLP_TR, PDFUNC);
 
 	board_info.irq = platform_get_irq(pdev, 0);
 	if (board_info.irq < 0) {
