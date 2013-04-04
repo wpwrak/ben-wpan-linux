@@ -815,6 +815,21 @@ static int at86rf230_fill_data(struct spi_device *spi)
 	return 0;
 }
 
+static void at86rf230_reset(struct at86rf230_local *lp)
+{
+	struct at86rf230_platform_data *pdata = lp->spi->dev.platform_data;
+
+	if (pdata->reset) {
+		pdata->reset(pdata->reset_data);
+	} else {
+		msleep(1);
+		gpio_set_value(lp->rstn, 0);
+		msleep(1);
+		gpio_set_value(lp->rstn, 1);
+	}
+	msleep(1);
+}
+
 static int at86rf230_probe(struct spi_device *spi)
 {
 	struct ieee802154_dev *dev;
@@ -856,9 +871,11 @@ static int at86rf230_probe(struct spi_device *spi)
 	if (rc)
 		goto err_fill;
 
-	rc = gpio_request(lp->rstn, "rstn");
-	if (rc)
-		goto err_rstn;
+	if (gpio_is_valid(lp->rstn)) {
+		rc = gpio_request(lp->rstn, "rstn");
+		if (rc)
+			goto err_rstn;
+	}
 
 	if (gpio_is_valid(lp->slp_tr)) {
 		rc = gpio_request(lp->slp_tr, "slp_tr");
@@ -866,9 +883,11 @@ static int at86rf230_probe(struct spi_device *spi)
 			goto err_slp_tr;
 	}
 
-	rc = gpio_direction_output(lp->rstn, 1);
-	if (rc)
-		goto err_gpio_dir;
+	if (gpio_is_valid(lp->rstn)) {
+		rc = gpio_direction_output(lp->rstn, 1);
+		if (rc)
+			goto err_gpio_dir;
+	}
 
 	if (gpio_is_valid(lp->slp_tr)) {
 		rc = gpio_direction_output(lp->slp_tr, 0);
@@ -876,12 +895,7 @@ static int at86rf230_probe(struct spi_device *spi)
 			goto err_gpio_dir;
 	}
 
-	/* Reset */
-	msleep(1);
-	gpio_set_value(lp->rstn, 0);
-	msleep(1);
-	gpio_set_value(lp->rstn, 1);
-	msleep(1);
+	at86rf230_reset(lp);
 
 	rc = at86rf230_read_subreg(lp, SR_MAN_ID_0, &man_id_0);
 	if (rc)
@@ -948,7 +962,8 @@ err_gpio_dir:
 	if (gpio_is_valid(lp->slp_tr))
 		gpio_free(lp->slp_tr);
 err_slp_tr:
-	gpio_free(lp->rstn);
+	if (gpio_is_valid(lp->rstn))
+		gpio_free(lp->rstn);
 err_rstn:
 err_fill:
 	spi_set_drvdata(spi, NULL);
