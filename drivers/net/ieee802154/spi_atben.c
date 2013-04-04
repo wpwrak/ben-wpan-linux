@@ -1,7 +1,7 @@
 /*
  * spi_atben.c - SPI host look-alike for ATBEN
  *
- * Written 2011 by Werner Almesberger
+ * Written 2011, 2013 by Werner Almesberger
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2
@@ -164,7 +164,7 @@ done_0:
 static void bidir(const struct atben_prv *prv, const uint8_t *tx, uint8_t *rx,
     int len)
 {
-	uint8_t mask, tv, rv;
+	uint8_t mask, tv, rv = 0;
 
 	while (len--) {
 		tv = *tx++;
@@ -227,7 +227,7 @@ static int atben_setup(struct spi_device *spi)
 /* ----- SPI master creation/removal --------------------------------------- */
 
 
-const static struct at86rf230_platform_data at86rf230_platform_data = {
+static const struct at86rf230_platform_data at86rf230_platform_data = {
 	.rstn	= -1,
 	.slp_tr	= JZ_GPIO_PORTD(9),
 	.dig2	= -1,
@@ -235,7 +235,7 @@ const static struct at86rf230_platform_data at86rf230_platform_data = {
 	/* set .reset_data later */
 };
 
-static int __devinit atben_probe(struct platform_device *pdev)
+static int atben_probe(struct platform_device *pdev)
 {
 	struct spi_board_info board_info = {
 		.modalias	= "at86rf230",
@@ -274,7 +274,7 @@ static int __devinit atben_probe(struct platform_device *pdev)
 		goto out_master;
 	}
 	prv->ioarea = request_mem_region(regs->start, resource_size(regs),
-                                        pdev->name);
+					 pdev->name);
 	if (!prv->ioarea) {
 		dev_err(prv->dev, "can't request ioarea\n");
 		goto out_master;
@@ -311,8 +311,7 @@ static int __devinit atben_probe(struct platform_device *pdev)
 		goto out_registered;
 	}
 
-	dev_info(&spi->dev, "ATBEN ready for mischief (IRQ %d)\n",
-	    board_info.irq);
+	dev_info(&spi->dev, "ATBEN ready (IRQ %d)\n", board_info.irq);
 
 	return 0;
 
@@ -333,7 +332,7 @@ out_master:
 	return err;
 }
 
-static int __devexit atben_remove(struct platform_device *pdev)
+static int atben_remove(struct platform_device *pdev)
 {
 	struct spi_master *master = platform_get_drvdata(pdev);
 	struct atben_prv *prv = spi_master_get_devdata(master);
@@ -358,7 +357,7 @@ static struct platform_driver atben_driver = {
 		.name	= "spi_atben",
 		.owner	= THIS_MODULE,
 	},
-	.remove		= __devexit_p(atben_remove),
+	.remove		= atben_remove,
 };
 
 static struct resource atben_resources[] = {
