@@ -4,3 +4,4 @@ obj-$(CONFIG_IEEE802154_AT86RF230) += at86rf230.o
 obj-$(CONFIG_IEEE802154_MRF24J40) += mrf24j40.o
 obj-$(CONFIG_IEEE802154_ATUSB) += atusb.o
 obj-$(CONFIG_IEEE802154_SPI_ATBEN) += spi_atben.o
+obj-$(CONFIG_IEEE802154_SPI_ATBEN_GPIO) += spi_atben_gpio.o
