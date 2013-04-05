@@ -52,7 +52,7 @@ static void atben_reset(void *dummy)
 	msleep(10);     /* precharge caps */
 
 	jz_gpio_port_set_value(JZ_GPIO_PORTD(0), 0,
-	    1 << VDD_OFF | 1 << SLP_TR | 1 << SCLK);
+			       1 << VDD_OFF | 1 << SLP_TR | 1 << SCLK);
 	msleep(10);
 }
 
