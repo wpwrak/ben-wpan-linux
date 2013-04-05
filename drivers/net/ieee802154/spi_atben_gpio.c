@@ -14,8 +14,9 @@
 //#include <linux/gpio.h>
 #include <linux/delay.h>
 #include <linux/spi/spi.h>
+#include <linux/spi/spi_gpio.h>
 #include <linux/spi/at86rf230.h>
-#include <asm/mach-jz4740/base.h>
+//#include <asm/mach-jz4740/base.h>
 
 //#include "at86rf230.h"
 
@@ -74,14 +75,14 @@ static struct spi_board_info atben_board_info = {
 	.chip_select	= 0,
 	.bus_num	= -1,
 	.max_speed_hz	= 8 * 1000 * 1000,
-	.controller_data = (void *) nSEL;
+	.controller_data = (void *) nSEL,
 	.platform_data	= &at86rf230_platform_data,
 };
 
-struct spi_gpio_platform_data spigpio_platform_data = {
+struct spi_gpio_platform_data atben_spi_gpio_platform_data = {
 	.mosi		= JZ_GPIO_PORTC(MOSI),
 	.miso		= JZ_GPIO_PORTC(MISO),
-	.sck		= JZ_GPIO_PORTC(SCK),
+	.sck		= JZ_GPIO_PORTC(SCLK),
 	.num_chipselect	= 1,
 };
 

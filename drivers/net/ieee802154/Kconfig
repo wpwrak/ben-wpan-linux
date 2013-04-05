@@ -49,7 +49,7 @@ config IEEE802154_SPI_ATBEN
 	  The module will be called 'spi_atben'.
 
 config IEEE802154_SPI_ATBEN_GPIO
-	tristate "ATBEN 8:10 SPI interface"
+	tristate "ATBEN 8:10 SPI-GPIO interface"
 	depends on IEEE802154_AT86RF230 && SPI && JZ4740_QI_LB60
 	---help---
 	  Alternative ATBEN driver using spi-gpio.
