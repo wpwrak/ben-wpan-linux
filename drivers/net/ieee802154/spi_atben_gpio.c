@@ -43,8 +43,7 @@ static void atben_reset(void *dummy)
 	jz_gpio_port_set_value(JZ_GPIO_PORTD(0), 0, discharge);
 	msleep(100);    /* let power drop */
 
-	/*
-	 * Hack: PD12/DAT2/IRQ is an active-high interrupt input, which is
+	/* Hack: PD12/DAT2/IRQ is an active-high interrupt input, which is
 	 * indicated by setting its direction bit to 1. We thus must not
 	 * configure it as an "input".
 	 */
