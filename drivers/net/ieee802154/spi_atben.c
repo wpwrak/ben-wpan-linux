@@ -288,7 +288,7 @@ static int atben_probe(struct platform_device *pdev)
 		goto out_ioarea;
 	}
 
-	writel(nSEL | MOSI | MISO | SCLK | SLP_TR, PDFUNC);
+	writel(nSEL | MOSI | MISO | SCLK | SLP_TR | IRQ, PDFUNC);
 
 	board_info.irq = platform_get_irq(pdev, 0);
 	if (board_info.irq < 0) {
