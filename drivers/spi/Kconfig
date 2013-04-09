@@ -186,6 +186,13 @@ config SPI_IMX
 	  This enables using the Freescale i.MX SPI controllers in master
 	  mode.
 
+config SPI_JZ4740_GPIO
+	tristate "GPIO-based SPI Master for Ingenic Jz4740"
+	depends on GENERIC_GPIO && MACH_JZ4740
+	select SPI_BITBANG
+	help
+	  This is a variant of SPI-GPIO optimized for the Ingenic Jz4740.
+
 config SPI_LM70_LLP
 	tristate "Parallel port adapter for LM70 eval board (DEVELOPMENT)"
 	depends on PARPORT
