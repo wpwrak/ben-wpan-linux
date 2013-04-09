@@ -17,11 +17,8 @@
 #include <linux/spi/spi_gpio.h>
 #include <asm/mach-jz4740/base.h>
 
-#define	PxPIN	(prv->port_base)
-#define	PxDATS	(prv->port_base+0x14)
-#define	PxDATC	(prv->port_base+0x18)
-#define	PxFUNC	(prv->port_base+0x48)
 
+#define	DRIVER_NAME	"spi_jz4740_gpio"
 
 struct spi_jz4740_gpio {
 	const struct spi_gpio_platform_data *pdata;
@@ -31,6 +28,11 @@ struct spi_jz4740_gpio {
 	uint32_t		mosi, miso, sck;
 	unsigned long		port_addr;
 };
+
+#define	PxPIN	(prv->port_base)
+#define	PxDATS	(prv->port_base+0x14)
+#define	PxDATC	(prv->port_base+0x18)
+#define	PxFUNC	(prv->port_base+0x48)
 
 
 /* ----- SPI transfers ----------------------------------------------------- */
@@ -317,7 +319,6 @@ static int spi_jz4740_gpio_probe(struct platform_device *pdev)
 	const struct spi_gpio_platform_data *pdata = pdev->dev.platform_data;
 	struct spi_master *master;
 	struct spi_jz4740_gpio *prv;
-	struct resource *regs;
 	int err = -ENXIO;
 
 	if (!pdata)
@@ -345,20 +346,13 @@ static int spi_jz4740_gpio_probe(struct platform_device *pdev)
 
 	dev_dbg(prv->dev, "%s\n", __func__);
 
-	regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!regs) {
-		dev_err(prv->dev, "no IORESOURCE_MEM\n");
-		err = -ENOENT;
-		goto out_master;
-	}
-	prv->ioarea = request_mem_region(regs->start, resource_size(regs),
-					 pdev->name);
+	prv->ioarea = request_mem_region(prv->port_addr, 0x100, pdev->name);
 	if (!prv->ioarea) {
 		dev_err(prv->dev, "can't request ioarea\n");
 		goto out_master;
 	}
 
-	prv->port_base = ioremap(regs->start, resource_size(regs));
+	prv->port_base = ioremap(prv->port_addr, 0x100);
 	if (!prv->port_base) {
 		dev_err(prv->dev, "can't ioremap\n");
 		goto out_ioarea;
@@ -406,31 +400,17 @@ static int spi_jz4740_gpio_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static struct platform_driver jz4740_spi_gpio_driver = {
+static struct platform_driver spi_jz4740_gpio_driver = {
 	.driver = {
-		.name	= "j4740-gpio-spi",
+		.name	= DRIVER_NAME,
 		.owner	= THIS_MODULE,
 	},
 	.probe		= spi_jz4740_gpio_probe,
 	.remove		= spi_jz4740_gpio_remove,
 };
-module_platform_driver(jz4740_spi_gpio_driver);
+module_platform_driver(spi_jz4740_gpio_driver);
 
-#if 0
-static struct resource atben_resources[] = {
-	{
-		.start  = JZ4740_GPIO_BASE_ADDR+0x300,
-		.end    = JZ4740_GPIO_BASE_ADDR+0x3ff,
-		.flags  = IORESOURCE_MEM,
-	},
-	{
-		/* set start and end later */
-		.flags  = IORESOURCE_IRQ,
-	},
-};
-#endif
-
-MODULE_ALIAS("platform:jz4740-spi-gpio");
+MODULE_ALIAS("platform:" DRIVER_NAME);
 MODULE_DESCRIPTION("Jz4740 GPIO SPI Driver");
 MODULE_AUTHOR("Werner Almesberger <werner@almesberger.net>");
 MODULE_LICENSE("GPL");
