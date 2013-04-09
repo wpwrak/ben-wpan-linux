@@ -12,7 +12,6 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
-#include <linux/delay.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/spi_gpio.h>
 #include <asm/mach-jz4740/base.h>
@@ -71,7 +70,7 @@ static void rx_only(const struct spi_jz4740_gpio *prv, uint8_t *buf, int len)
 
 
 static void tx_only(const struct spi_jz4740_gpio *prv,
-    const uint8_t *buf, int len)
+		const uint8_t *buf, int len)
 {
 	uint32_t mosi = prv->mosi;
 	uint32_t sck = prv->sck;
@@ -133,7 +132,7 @@ done_0:
 
 
 static void bidir(const struct spi_jz4740_gpio *prv,
-    const uint8_t *tx, uint8_t *rx, int len)
+		const uint8_t *tx, uint8_t *rx, int len)
 {
 	uint32_t mosi = prv->mosi;
 	uint32_t miso = prv->miso;
@@ -164,7 +163,7 @@ static inline unsigned get_nsel(struct spi_device *spi)
 
 
 static int spi_jz4740_gpio_transfer(struct spi_device *spi,
-    struct spi_message *msg)
+		struct spi_message *msg)
 {
 	struct spi_jz4740_gpio *prv = spi_master_get_devdata(spi->master);
 	struct spi_transfer *xfer;
@@ -205,7 +204,7 @@ static int spi_jz4740_gpio_transfer(struct spi_device *spi,
 
 
 static int get_gpio(struct spi_jz4740_gpio *prv,
-    unsigned pin, const char *label, int value)
+		unsigned pin, const char *label, int value)
 {
 	int err;
 	unsigned long port;
@@ -221,7 +220,7 @@ static int get_gpio(struct spi_jz4740_gpio *prv,
 	if (err)
 		goto fail;
 
-	err = jz_gpio_set_function(pin, 0);
+	err = jz_gpio_set_function(pin, JZ_GPIO_FUNC_NONE);
 	if (err)
 		goto fail;
 
@@ -239,7 +238,7 @@ static int get_gpio(struct spi_jz4740_gpio *prv,
 
 fail:
 	gpio_free(pin);
-        return err;
+	return err;
 }
 
 static int spi_jz4740_gpio_setup(struct spi_device *spi)
@@ -276,7 +275,7 @@ static void free_gpios(struct spi_jz4740_gpio *prv)
 
 
 static int setup_gpios(struct spi_jz4740_gpio *prv, const char *label,
-    uint16_t *flags)
+		uint16_t *flags)
 {
 	const struct spi_gpio_platform_data *pdata = prv->pdata;
 	int err;
@@ -311,6 +310,7 @@ fail:
 	return err;
 }
 
+
 /* ----- SPI master creation/removal --------------------------------------- */
 
 
@@ -319,8 +319,9 @@ static int spi_jz4740_gpio_probe(struct platform_device *pdev)
 	const struct spi_gpio_platform_data *pdata = pdev->dev.platform_data;
 	struct spi_master *master;
 	struct spi_jz4740_gpio *prv;
-	int err = -ENXIO;
+	int err;
 
+	dev_dbg(prv->dev, "%s\n", __func__);
 	if (!pdata)
 		return -ENODEV;
 
@@ -343,8 +344,6 @@ static int spi_jz4740_gpio_probe(struct platform_device *pdev)
 	master->setup		= spi_jz4740_gpio_setup;
 	master->cleanup		= spi_jz4740_gpio_cleanup;
 	master->transfer	= spi_jz4740_gpio_transfer;
-
-	dev_dbg(prv->dev, "%s\n", __func__);
 
 	prv->ioarea = request_mem_region(prv->port_addr, 0x100, pdev->name);
 	if (!prv->ioarea) {
@@ -385,7 +384,7 @@ static int spi_jz4740_gpio_remove(struct platform_device *pdev)
 	struct spi_master *master = platform_get_drvdata(pdev);
 	struct spi_jz4740_gpio *prv = spi_master_get_devdata(master);
 
-// restore GPIOs
+	/* @@@ restore GPIOs ? */
 
 	spi_unregister_master(master);
 
