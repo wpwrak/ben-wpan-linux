@@ -85,7 +85,11 @@ struct spi_gpio_platform_data atben_spi_gpio_platform_data = {
 };
 
 static struct platform_device atben_device = {
+#ifdef CONFIG_SPI_JZ4740_GPIO
+	.name	= "spi_jz4740_gpio",
+#else
 	.name	= "spi_gpio",
+#endif
 	.id	= 2,
 	.dev	= {
 		.platform_data = &atben_spi_gpio_platform_data,
@@ -94,10 +98,12 @@ static struct platform_device atben_device = {
 
 static int __init atben_init(void)
 {
+#ifndef CONFIG_SPI_JZ4740_GPIO
 	jz_gpio_set_function(JZ_GPIO_PORTD(MOSI), JZ_GPIO_FUNC_NONE);
 	jz_gpio_set_function(JZ_GPIO_PORTD(MISO), JZ_GPIO_FUNC_NONE);
 	jz_gpio_set_function(JZ_GPIO_PORTD(SCLK), JZ_GPIO_FUNC_NONE);
 	jz_gpio_set_function(JZ_GPIO_PORTD(nSEL), JZ_GPIO_FUNC_NONE);
+#endif
 	jz_gpio_set_function(JZ_GPIO_PORTD(SLP_TR), JZ_GPIO_FUNC_NONE);
 	jz_gpio_set_function(JZ_GPIO_PORTD(IRQ), JZ_GPIO_FUNC_NONE);
 
