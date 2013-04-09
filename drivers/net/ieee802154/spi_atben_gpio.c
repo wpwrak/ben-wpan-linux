@@ -85,8 +85,10 @@ struct spi_gpio_platform_data atben_spi_gpio_platform_data = {
 };
 
 static struct platform_device atben_device = {
-#ifdef CONFIG_SPI_JZ4740_GPIO
+#if defined(CONFIG_SPI_JZ4740_GPIO)
 	.name	= "spi_jz4740_gpio",
+#elif defined(CONFIG_SPI_GPIO_ATBEN)
+	.name	= "spi_gpio_atben",
 #else
 	.name	= "spi_gpio",
 #endif
