@@ -2,6 +2,7 @@
  * spi-jz4740-gpio.c - Bit-banging SPI host for the Jz4740
  *
  * Written 2011, 2013 by Werner Almesberger
+ * Based on spi-gpio.c, Copyright (C) 2006,2008 David Brownell
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2
