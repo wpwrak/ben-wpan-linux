@@ -16,9 +16,7 @@
 #include <linux/spi/spi.h>
 #include <linux/spi/spi_gpio.h>
 #include <linux/spi/at86rf230.h>
-//#include <asm/mach-jz4740/base.h>
-
-//#include "at86rf230.h"
+#include <asm/mach-jz4740/gpio.h>
 
 
 enum {
@@ -45,16 +43,16 @@ static void atben_reset(void *dummy)
 	jz_gpio_port_set_value(JZ_GPIO_PORTD(0), 0, discharge);
 	msleep(100);    /* let power drop */
 
-	/*
-	 * Hack: PD12/DAT2/IRQ is an active-high interrupt input, which is
+	/* Hack: PD12/DAT2/IRQ is an active-high interrupt input, which is
 	 * indicated by setting its direction bit to 1. We thus must not
 	 * configure it as an "input".
 	 */
-	jz_gpio_port_direction_input(JZ_GPIO_PORTD(0), MISO);
+	jz_gpio_port_direction_input(JZ_GPIO_PORTD(0), 1 << MISO);
 	jz_gpio_port_set_value(JZ_GPIO_PORTD(0), charge, charge);
 	msleep(10);     /* precharge caps */
 
-	jz_gpio_port_set_value(JZ_GPIO_PORTD(0), 0, VDD_OFF | SLP_TR | SCLK);
+	jz_gpio_port_set_value(JZ_GPIO_PORTD(0), 0,
+			       1 << VDD_OFF | 1 << SLP_TR | 1 << SCLK);
 	msleep(10);
 }
 
@@ -73,32 +71,39 @@ static struct spi_board_info atben_board_info = {
 	.modalias	= "at86rf230",
 	/* set .irq later */
 	.chip_select	= 0,
-	.bus_num	= -1,
+	.bus_num	= 2,
 	.max_speed_hz	= 8 * 1000 * 1000,
-	.controller_data = (void *) nSEL,
+	.controller_data = (void *) JZ_GPIO_PORTD(nSEL),
 	.platform_data	= &at86rf230_platform_data,
 };
 
 struct spi_gpio_platform_data atben_spi_gpio_platform_data = {
-	.mosi		= JZ_GPIO_PORTC(MOSI),
-	.miso		= JZ_GPIO_PORTC(MISO),
-	.sck		= JZ_GPIO_PORTC(SCLK),
+	.mosi		= JZ_GPIO_PORTD(MOSI),
+	.miso		= JZ_GPIO_PORTD(MISO),
+	.sck		= JZ_GPIO_PORTD(SCLK),
 	.num_chipselect	= 1,
 };
 
 static struct platform_device atben_device = {
-	.name = "spi_gpio",
-	.id = -1,
-	.dev = {
-		.platform_data = &atben_spigpio_platform_data,
+	.name	= "spi_gpio",
+	.id	= 2,
+	.dev	= {
+		.platform_data = &atben_spi_gpio_platform_data,
 	},
 };
 
 static int __init atben_init(void)
 {
-	atben_board_info.irq = gpio_to_irq(JZ_GPIO_PORTD(IRQ);
-	spi_register_board_info(&atben_board_info,
-	    ARRAY_SIZE(atben_board_info));
+	jz_gpio_set_function(JZ_GPIO_PORTD(MOSI), JZ_GPIO_FUNC_NONE);
+	jz_gpio_set_function(JZ_GPIO_PORTD(MISO), JZ_GPIO_FUNC_NONE);
+	jz_gpio_set_function(JZ_GPIO_PORTD(SCLK), JZ_GPIO_FUNC_NONE);
+	jz_gpio_set_function(JZ_GPIO_PORTD(nSEL), JZ_GPIO_FUNC_NONE);
+	jz_gpio_set_function(JZ_GPIO_PORTD(SLP_TR), JZ_GPIO_FUNC_NONE);
+	jz_gpio_set_function(JZ_GPIO_PORTD(IRQ), JZ_GPIO_FUNC_NONE);
+
+	atben_board_info.irq = gpio_to_irq(JZ_GPIO_PORTD(IRQ));
+	spi_register_board_info(&atben_board_info, 1);
+
 	return platform_device_register(&atben_device);
 }
 
@@ -109,7 +114,6 @@ static void __exit atben_exit(void)
 
 module_init(atben_init);
 module_exit(atben_exit);
-
 
 MODULE_DESCRIPTION("ATBEN SPI-GPIO Framework");
 MODULE_AUTHOR("Werner Almesberger <werner@almesberger.net>");
