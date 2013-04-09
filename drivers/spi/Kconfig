@@ -177,6 +177,13 @@ config SPI_GPIO
 	  GPIO operations, you should be able to leverage that for better
 	  speed with a custom version of this driver; see the source code.
 
+config SPI_GPIO_ATBEN
+	tristate "GPIO-based SPI Master for ATBEN"
+	depends on GENERIC_GPIO && MACH_JZ4740
+	select SPI_BITBANG
+	help
+	  This is a device-specific variant of SPI-GPIO, for ATBEN.
+
 config SPI_IMX
 	tristate "Freescale i.MX SPI controllers"
 	depends on ARCH_MXC
