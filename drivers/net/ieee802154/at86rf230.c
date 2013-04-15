@@ -865,6 +865,7 @@ static int at86rf230_probe(struct spi_device *spi)
 		return -EINVAL;
 	}
 
+	pdata = spi->dev.platform_data;
 	if (!pdata) {
 		dev_err(&spi->dev, "no platform_data\n");
 		return -EINVAL;
