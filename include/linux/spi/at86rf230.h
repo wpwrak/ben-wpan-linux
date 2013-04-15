@@ -28,6 +28,7 @@ struct at86rf230_platform_data {
 	int dig2;
 	void (*reset)(void *reset_data);
 	void *reset_data;
+	int irq_type;
 };
 
 #endif
