@@ -65,6 +65,7 @@ static const struct at86rf230_platform_data at86rf230_platform_data = {
 	.slp_tr	= -1,	/* not used */
 	.dig2	= -1,
 	.reset	= atben_reset,
+	.irq_type = IRQF_TRIGGER_HIGH,
 };
 
 static struct spi_board_info atben_board_info = {
