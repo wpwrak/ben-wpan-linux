@@ -665,6 +665,7 @@ static int sco_sock_recvmsg(struct kiocb *iocb, struct socket *sock,
 	    test_bit(BT_SK_DEFER_SETUP, &bt_sk(sk)->flags)) {
 		hci_conn_accept(pi->conn->hcon, 0);
 		sk->sk_state = BT_CONFIG;
+		msg->msg_namelen = 0;
 
 		release_sock(sk);
 		return 0;
@@ -1112,8 +1113,7 @@ void __exit sco_exit(void)
 
 	debugfs_remove(sco_debugfs);
 
-	if (bt_sock_unregister(BTPROTO_SCO) < 0)
-		BT_ERR("SCO socket unregistration failed");
+	bt_sock_unregister(BTPROTO_SCO);
 
 	proto_unregister(&sco_proto);
 }

@@ -106,6 +106,9 @@ static struct platform_device_id fec_devtype[] = {
 		.driver_data = FEC_QUIRK_ENET_MAC | FEC_QUIRK_HAS_GBIT |
 				FEC_QUIRK_HAS_BUFDESC_EX,
 	}, {
+		.name = "mvf-fec",
+		.driver_data = FEC_QUIRK_ENET_MAC,
+	}, {
 		/* sentinel */
 	}
 };
@@ -116,6 +119,7 @@ enum imx_fec_type {
 	IMX27_FEC,	/* runs on i.mx27/35/51 */
 	IMX28_FEC,
 	IMX6Q_FEC,
+	MVF_FEC,
 };
 
 static const struct of_device_id fec_dt_ids[] = {
@@ -123,6 +127,7 @@ static const struct of_device_id fec_dt_ids[] = {
 	{ .compatible = "fsl,imx27-fec", .data = &fec_devtype[IMX27_FEC], },
 	{ .compatible = "fsl,imx28-fec", .data = &fec_devtype[IMX28_FEC], },
 	{ .compatible = "fsl,imx6q-fec", .data = &fec_devtype[IMX6Q_FEC], },
+	{ .compatible = "fsl,mvf-fec", .data = &fec_devtype[MVF_FEC], },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, fec_dt_ids);
@@ -261,7 +266,7 @@ fec_enet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 		/* Ooops.  All transmit buffers are full.  Bail out.
 		 * This should not happen, since ndev->tbusy should be set.
 		 */
-		printk("%s: tx queue full!.\n", ndev->name);
+		netdev_err(ndev, "tx queue full!\n");
 		return NETDEV_TX_BUSY;
 	}
 
@@ -573,7 +578,7 @@ fec_stop(struct net_device *ndev)
 		writel(1, fep->hwp + FEC_X_CNTRL); /* Graceful transmit stop */
 		udelay(10);
 		if (!(readl(fep->hwp + FEC_IEVENT) & FEC_ENET_GRA))
-			printk("fec_stop : Graceful transmit stop did not complete !\n");
+			netdev_err(ndev, "Graceful transmit stop did not complete!\n");
 	}
 
 	/* Whack a reset.  We should wait for this. */
@@ -671,7 +676,7 @@ fec_enet_tx(struct net_device *ndev)
 		}
 
 		if (status & BD_ENET_TX_READY)
-			printk("HEY! Enet xmit interrupt and TX_READY.\n");
+			netdev_err(ndev, "HEY! Enet xmit interrupt and TX_READY\n");
 
 		/* Deferred means some collisions occurred during transmit,
 		 * but we eventually sent the packet OK.
@@ -739,7 +744,7 @@ fec_enet_rx(struct net_device *ndev, int budget)
 		 * the last indicator should be set.
 		 */
 		if ((status & BD_ENET_RX_LAST) == 0)
-			printk("FEC ENET: rcv is not +last\n");
+			netdev_err(ndev, "rcv is not +last\n");
 
 		if (!fep->opened)
 			goto rx_processing_done;
@@ -1026,7 +1031,7 @@ static int fec_enet_mdio_read(struct mii_bus *bus, int mii_id, int regnum)
 			usecs_to_jiffies(FEC_MII_TIMEOUT));
 	if (time_left == 0) {
 		fep->mii_timeout = 1;
-		printk(KERN_ERR "FEC: MDIO read timeout\n");
+		netdev_err(fep->netdev, "MDIO read timeout\n");
 		return -ETIMEDOUT;
 	}
 
@@ -1054,7 +1059,7 @@ static int fec_enet_mdio_write(struct mii_bus *bus, int mii_id, int regnum,
 			usecs_to_jiffies(FEC_MII_TIMEOUT));
 	if (time_left == 0) {
 		fep->mii_timeout = 1;
-		printk(KERN_ERR "FEC: MDIO write timeout\n");
+		netdev_err(fep->netdev, "MDIO write timeout\n");
 		return -ETIMEDOUT;
 	}
 
@@ -1094,9 +1099,7 @@ static int fec_enet_mii_probe(struct net_device *ndev)
 	}
 
 	if (phy_id >= PHY_MAX_ADDR) {
-		printk(KERN_INFO
-			"%s: no PHY, assuming direct connection to switch\n",
-			ndev->name);
+		netdev_info(ndev, "no PHY, assuming direct connection to switch\n");
 		strncpy(mdio_bus_id, "fixed-0", MII_BUS_ID_SIZE);
 		phy_id = 0;
 	}
@@ -1105,7 +1108,7 @@ static int fec_enet_mii_probe(struct net_device *ndev)
 	phy_dev = phy_connect(ndev, phy_name, &fec_enet_adjust_link,
 			      fep->phy_interface);
 	if (IS_ERR(phy_dev)) {
-		printk(KERN_ERR "%s: could not attach to PHY\n", ndev->name);
+		netdev_err(ndev, "could not attach to PHY\n");
 		return PTR_ERR(phy_dev);
 	}
 
@@ -1123,11 +1126,9 @@ static int fec_enet_mii_probe(struct net_device *ndev)
 	fep->link = 0;
 	fep->full_duplex = 0;
 
-	printk(KERN_INFO
-		"%s: Freescale FEC PHY driver [%s] (mii_bus:phy_addr=%s, irq=%d)\n",
-		ndev->name,
-		fep->phy_dev->drv->name, dev_name(&fep->phy_dev->dev),
-		fep->phy_dev->irq);
+	netdev_info(ndev, "Freescale FEC PHY driver [%s] (mii_bus:phy_addr=%s, irq=%d)\n",
+		    fep->phy_dev->drv->name, dev_name(&fep->phy_dev->dev),
+		    fep->phy_dev->irq);
 
 	return 0;
 }
@@ -1852,6 +1853,9 @@ fec_probe(struct platform_device *pdev)
 	ret = register_netdev(ndev);
 	if (ret)
 		goto failed_register;
+
+	if (fep->bufdesc_ex && fep->ptp_clock)
+		netdev_info(ndev, "registered PHC device %d\n", fep->dev_id);
 
 	return 0;
 

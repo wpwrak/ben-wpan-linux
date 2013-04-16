@@ -1374,6 +1374,18 @@ static int mwifiex_cfg80211_start_ap(struct wiphy *wiphy,
 	}
 
 	mwifiex_set_ht_params(priv, bss_cfg, params);
+
+	if (priv->adapter->is_hw_11ac_capable) {
+		mwifiex_set_vht_params(priv, bss_cfg, params);
+		mwifiex_set_vht_width(priv, params->chandef.width,
+				      priv->ap_11ac_enabled);
+	}
+
+	if (priv->ap_11ac_enabled)
+		mwifiex_set_11ac_ba_params(priv);
+	else
+		mwifiex_set_ba_params(priv);
+
 	mwifiex_set_wmm_params(priv, bss_cfg, params);
 
 	if (params->inactivity_timeout > 0) {
@@ -1892,7 +1904,8 @@ mwifiex_cfg80211_scan(struct wiphy *wiphy,
 		}
 	}
 
-	for (i = 0; i < request->n_channels; i++) {
+	for (i = 0; i < min_t(u32, request->n_channels,
+			      MWIFIEX_USER_SCAN_CHAN_MAX); i++) {
 		chan = request->channels[i];
 		priv->user_scan_cfg->chan_list[i].chan_number = chan->hw_value;
 		priv->user_scan_cfg->chan_list[i].radio_type = chan->band;
