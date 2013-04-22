@@ -23,7 +23,7 @@
 #define AT86RF230_H
 
 struct at86rf230_platform_data {
-	int rstn;
+	int rstn;	/* only used if "reset" (below) is NULL */
 	int slp_tr;
 	int dig2;
 
@@ -41,6 +41,10 @@ struct at86rf230_platform_data {
 	 */
 	int irq_type;
 
+	/* Platform-specific transceiver reset function, e.g., to use
+	 * power cycling instead of the reset line. If "reset" is NULL,
+	 * the driver resets the transceiver through the "rstn" GPIO.
+	 */
 	void (*reset)(void *reset_data);
 	void *reset_data;
 };
