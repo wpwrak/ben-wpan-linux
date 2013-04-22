@@ -5,6 +5,7 @@
 /* (C) 1999-2001 Paul `Rusty' Russell
  * (C) 2002-2006 Netfilter Core Team <coreteam@netfilter.org>
  * (C) 2003,2004 USAGI/WIDE Project <http://www.linux-ipv6.org>
+ * (C) 2005-2012 Patrick McHardy <kaber@trash.net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -1260,7 +1261,7 @@ void nf_ct_iterate_cleanup(struct net *net,
 EXPORT_SYMBOL_GPL(nf_ct_iterate_cleanup);
 
 struct __nf_ct_flush_report {
-	u32 pid;
+	u32 portid;
 	int report;
 };
 
@@ -1275,7 +1276,7 @@ static int kill_report(struct nf_conn *i, void *data)
 
 	/* If we fail to deliver the event, death_by_timeout() will retry */
 	if (nf_conntrack_event_report(IPCT_DESTROY, i,
-				      fr->pid, fr->report) < 0)
+				      fr->portid, fr->report) < 0)
 		return 1;
 
 	/* Avoid the delivery of the destroy event in death_by_timeout(). */
@@ -1298,10 +1299,10 @@ void nf_ct_free_hashtable(void *hash, unsigned int size)
 }
 EXPORT_SYMBOL_GPL(nf_ct_free_hashtable);
 
-void nf_conntrack_flush_report(struct net *net, u32 pid, int report)
+void nf_conntrack_flush_report(struct net *net, u32 portid, int report)
 {
 	struct __nf_ct_flush_report fr = {
-		.pid 	= pid,
+		.portid	= portid,
 		.report = report,
 	};
 	nf_ct_iterate_cleanup(net, kill_report, &fr);

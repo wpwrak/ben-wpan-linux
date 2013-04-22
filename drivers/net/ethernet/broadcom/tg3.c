@@ -6715,7 +6715,7 @@ static int tg3_rx(struct tg3_napi *tnapi, int budget)
 
 		if (desc->type_flags & RXD_FLAG_VLAN &&
 		    !(tp->rx_mode & RX_MODE_KEEP_VLAN_TAG))
-			__vlan_hwaccel_put_tag(skb,
+			__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021Q),
 					       desc->err_vlan & RXD_VLAN_MASK);
 
 		napi_gro_receive(&tnapi->napi, skb);
@@ -17197,7 +17197,7 @@ static int tg3_init_one(struct pci_dev *pdev,
 
 	tg3_init_bufmgr_config(tp);
 
-	features |= NETIF_F_HW_VLAN_TX | NETIF_F_HW_VLAN_RX;
+	features |= NETIF_F_HW_VLAN_CTAG_TX | NETIF_F_HW_VLAN_CTAG_RX;
 
 	/* 5700 B0 chips do not support checksumming correctly due
 	 * to hardware bugs.
@@ -17533,15 +17533,9 @@ out:
 
 	return err;
 }
+#endif /* CONFIG_PM_SLEEP */
 
 static SIMPLE_DEV_PM_OPS(tg3_pm_ops, tg3_suspend, tg3_resume);
-#define TG3_PM_OPS (&tg3_pm_ops)
-
-#else
-
-#define TG3_PM_OPS NULL
-
-#endif /* CONFIG_PM_SLEEP */
 
 /**
  * tg3_io_error_detected - called when PCI error is detected
@@ -17689,7 +17683,7 @@ static struct pci_driver tg3_driver = {
 	.probe		= tg3_init_one,
 	.remove		= tg3_remove_one,
 	.err_handler	= &tg3_err_handler,
-	.driver.pm	= TG3_PM_OPS,
+	.driver.pm	= &tg3_pm_ops,
 };
 
 static int __init tg3_init(void)
