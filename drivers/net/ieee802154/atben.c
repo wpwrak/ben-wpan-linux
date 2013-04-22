@@ -1,5 +1,5 @@
 /*
- * spi_atben_gpio.c - SPI-GPIO framework for ATBEN
+ * atben.c - SPI-GPIO framework for ATBEN
  *
  * Written 2011, 2013 by Werner Almesberger
  *
