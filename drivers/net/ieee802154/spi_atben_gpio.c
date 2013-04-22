@@ -11,7 +11,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
-//#include <linux/gpio.h>
+#include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/spi_gpio.h>
@@ -61,10 +61,11 @@ static void atben_reset(void *dummy)
 
 
 static const struct at86rf230_platform_data at86rf230_platform_data = {
-	.rstn	= -1,	/* use reset function instead */
-	.slp_tr	= -1,	/* not used */
-	.dig2	= -1,
-	.reset	= atben_reset,
+	.rstn		= -1,	/* use reset function instead */
+	.slp_tr		= -1,	/* not used */
+	.dig2		= -1,
+	.irq_type	= IRQF_TRIGGER_HIGH,
+	.reset		= atben_reset,
 };
 
 static struct spi_board_info atben_board_info = {
