@@ -214,6 +214,7 @@ struct be_tx_stats {
 };
 
 struct be_tx_obj {
+	u32 db_offset;
 	struct be_queue_info q;
 	struct be_queue_info cq;
 	/* Remember the skbs that were transmitted */
@@ -434,6 +435,7 @@ struct be_adapter {
 	u8 wol_cap;
 	bool wol;
 	u32 uc_macs;		/* Count of secondary UC MAC programmed */
+	u16 asic_rev;
 	u32 msg_enable;
 	int be_get_temp_freq;
 	u16 max_mcast_mac;
