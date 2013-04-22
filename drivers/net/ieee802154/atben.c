@@ -20,7 +20,7 @@
 
 
 #ifdef CONFIG_SPI_JZ4740_GPIO
-#define	SPI_GPIO_DRIVER	"spi_jz4740_gpio",
+#define	SPI_GPIO_DRIVER	"spi_jz4740_gpio"
 #else
 #define	SPI_GPIO_DRIVER	"spi_gpio"
 #endif
