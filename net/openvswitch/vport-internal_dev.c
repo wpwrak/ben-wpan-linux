@@ -137,7 +137,7 @@ static void do_setup(struct net_device *netdev)
 			   NETIF_F_HIGHDMA | NETIF_F_HW_CSUM | NETIF_F_TSO;
 
 	netdev->vlan_features = netdev->features;
-	netdev->features |= NETIF_F_HW_VLAN_TX;
+	netdev->features |= NETIF_F_HW_VLAN_CTAG_TX;
 	netdev->hw_features = netdev->features & ~NETIF_F_LLTX;
 	eth_hw_addr_random(netdev);
 }
@@ -173,16 +173,19 @@ static struct vport *internal_dev_create(const struct vport_parms *parms)
 	if (vport->port_no == OVSP_LOCAL)
 		netdev_vport->dev->features |= NETIF_F_NETNS_LOCAL;
 
+	rtnl_lock();
 	err = register_netdevice(netdev_vport->dev);
 	if (err)
 		goto error_free_netdev;
 
 	dev_set_promiscuity(netdev_vport->dev, 1);
+	rtnl_unlock();
 	netif_start_queue(netdev_vport->dev);
 
 	return vport;
 
 error_free_netdev:
+	rtnl_unlock();
 	free_netdev(netdev_vport->dev);
 error_free_vport:
 	ovs_vport_free(vport);
@@ -195,10 +198,13 @@ static void internal_dev_destroy(struct vport *vport)
 	struct netdev_vport *netdev_vport = netdev_vport_priv(vport);
 
 	netif_stop_queue(netdev_vport->dev);
+	rtnl_lock();
 	dev_set_promiscuity(netdev_vport->dev, -1);
 
 	/* unregister_netdevice() waits for an RCU grace period. */
 	unregister_netdevice(netdev_vport->dev);
+
+	rtnl_unlock();
 }
 
 static int internal_dev_recv(struct vport *vport, struct sk_buff *skb)

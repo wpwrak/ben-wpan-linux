@@ -388,7 +388,9 @@ struct sock *nfc_llcp_accept_dequeue(struct sock *parent,
 		}
 
 		if (sk->sk_state == LLCP_CONNECTED || !newsock) {
-			nfc_llcp_accept_unlink(sk);
+			list_del_init(&lsk->accept_queue);
+			sock_put(sk);
+
 			if (newsock)
 				sock_graft(sk, newsock);
 
@@ -521,7 +523,8 @@ static unsigned int llcp_sock_poll(struct file *file, struct socket *sock,
 		return llcp_accept_poll(sk);
 
 	if (sk->sk_err || !skb_queue_empty(&sk->sk_error_queue))
-		mask |= POLLERR;
+		mask |= POLLERR |
+			(sock_flag(sk, SOCK_SELECT_ERR_QUEUE) ? POLLPRI : 0);
 
 	if (!skb_queue_empty(&sk->sk_receive_queue))
 		mask |= POLLIN | POLLRDNORM;
@@ -582,8 +585,6 @@ static int llcp_sock_release(struct socket *sock)
 			nfc_llcp_accept_unlink(accept_sk);
 
 			release_sock(accept_sk);
-
-			sock_orphan(accept_sk);
 		}
 	}
 
@@ -764,6 +765,8 @@ static int llcp_sock_recvmsg(struct kiocb *iocb, struct socket *sock,
 
 	pr_debug("%p %zu\n", sk, len);
 
+	msg->msg_namelen = 0;
+
 	lock_sock(sk);
 
 	if (sk->sk_state == LLCP_CLOSED &&
@@ -809,6 +812,7 @@ static int llcp_sock_recvmsg(struct kiocb *iocb, struct socket *sock,
 
 		pr_debug("Datagram socket %d %d\n", ui_cb->dsap, ui_cb->ssap);
 
+		memset(sockaddr, 0, sizeof(*sockaddr));
 		sockaddr->sa_family = AF_NFC;
 		sockaddr->nfc_protocol = NFC_PROTO_NFC_DEP;
 		sockaddr->dsap = ui_cb->dsap;

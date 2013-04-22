@@ -687,10 +687,8 @@ static struct be_mcc_wrb *wrb_from_mccq(struct be_adapter *adapter)
 	if (!mccq->created)
 		return NULL;
 
-	if (atomic_read(&mccq->used) >= mccq->len) {
-		dev_err(&adapter->pdev->dev, "Out of MCCQ wrbs\n");
+	if (atomic_read(&mccq->used) >= mccq->len)
 		return NULL;
-	}
 
 	wrb = queue_head_node(mccq);
 	queue_head_inc(mccq);
@@ -1095,15 +1093,14 @@ int be_cmd_mccq_create(struct be_adapter *adapter,
 	return status;
 }
 
-int be_cmd_txq_create(struct be_adapter *adapter,
-			struct be_queue_info *txq,
-			struct be_queue_info *cq)
+int be_cmd_txq_create(struct be_adapter *adapter, struct be_tx_obj *txo)
 {
 	struct be_mcc_wrb *wrb;
 	struct be_cmd_req_eth_tx_create *req;
+	struct be_queue_info *txq = &txo->q;
+	struct be_queue_info *cq = &txo->cq;
 	struct be_dma_mem *q_mem = &txq->dma_mem;
-	void *ctxt;
-	int status;
+	int status, ver = 0;
 
 	spin_lock_bh(&adapter->mcc_lock);
 
@@ -1114,34 +1111,37 @@ int be_cmd_txq_create(struct be_adapter *adapter,
 	}
 
 	req = embedded_payload(wrb);
-	ctxt = &req->context;
 
 	be_wrb_cmd_hdr_prepare(&req->hdr, CMD_SUBSYSTEM_ETH,
 		OPCODE_ETH_TX_CREATE, sizeof(*req), wrb, NULL);
 
 	if (lancer_chip(adapter)) {
 		req->hdr.version = 1;
-		AMAP_SET_BITS(struct amap_tx_context, if_id, ctxt,
-					adapter->if_handle);
+		req->if_id = cpu_to_le16(adapter->if_handle);
+	} else if (BEx_chip(adapter)) {
+		if (adapter->function_caps & BE_FUNCTION_CAPS_SUPER_NIC)
+			req->hdr.version = 2;
+	} else { /* For SH */
+		req->hdr.version = 2;
 	}
 
 	req->num_pages = PAGES_4K_SPANNED(q_mem->va, q_mem->size);
 	req->ulp_num = BE_ULP1_NUM;
 	req->type = BE_ETH_TX_RING_TYPE_STANDARD;
-
-	AMAP_SET_BITS(struct amap_tx_context, tx_ring_size, ctxt,
-		be_encoded_q_len(txq->len));
-	AMAP_SET_BITS(struct amap_tx_context, ctx_valid, ctxt, 1);
-	AMAP_SET_BITS(struct amap_tx_context, cq_id_send, ctxt, cq->id);
-
-	be_dws_cpu_to_le(ctxt, sizeof(req->context));
-
+	req->cq_id = cpu_to_le16(cq->id);
+	req->queue_size = be_encoded_q_len(txq->len);
 	be_cmd_page_addrs_prepare(req->pages, ARRAY_SIZE(req->pages), q_mem);
+
+	ver = req->hdr.version;
 
 	status = be_mcc_notify_wait(adapter);
 	if (!status) {
 		struct be_cmd_resp_eth_tx_create *resp = embedded_payload(wrb);
 		txq->id = le16_to_cpu(resp->cid);
+		if (ver == 2)
+			txo->db_offset = le32_to_cpu(resp->db_offset);
+		else
+			txo->db_offset = DB_TXULP1_OFFSET;
 		txq->created = true;
 	}
 
@@ -1834,7 +1834,7 @@ err:
 
 /* Uses mbox */
 int be_cmd_query_fw_cfg(struct be_adapter *adapter, u32 *port_num,
-		u32 *mode, u32 *caps)
+			u32 *mode, u32 *caps, u16 *asic_rev)
 {
 	struct be_mcc_wrb *wrb;
 	struct be_cmd_req_query_fw_cfg *req;
@@ -1855,6 +1855,7 @@ int be_cmd_query_fw_cfg(struct be_adapter *adapter, u32 *port_num,
 		*port_num = le32_to_cpu(resp->phys_port);
 		*mode = le32_to_cpu(resp->function_mode);
 		*caps = le32_to_cpu(resp->function_caps);
+		*asic_rev = le32_to_cpu(resp->asic_revision) & 0xFF;
 	}
 
 	mutex_unlock(&adapter->mbox_lock);
@@ -2343,7 +2344,6 @@ int be_cmd_get_seeprom_data(struct be_adapter *adapter,
 {
 	struct be_mcc_wrb *wrb;
 	struct be_cmd_req_seeprom_read *req;
-	struct be_sge *sge;
 	int status;
 
 	spin_lock_bh(&adapter->mcc_lock);
@@ -2354,7 +2354,6 @@ int be_cmd_get_seeprom_data(struct be_adapter *adapter,
 		goto err;
 	}
 	req = nonemb_cmd->va;
-	sge = nonembedded_sgl(wrb);
 
 	be_wrb_cmd_hdr_prepare(&req->hdr, CMD_SUBSYSTEM_COMMON,
 			OPCODE_COMMON_SEEPROM_READ, sizeof(*req), wrb,
@@ -2947,7 +2946,8 @@ static struct be_nic_resource_desc *be_get_nic_desc(u8 *buf, u32 desc_count,
 			break;
 		}
 
-		if (desc->desc_type == NIC_RESOURCE_DESC_TYPE_ID)
+		if (desc->desc_type == NIC_RESOURCE_DESC_TYPE_V0 ||
+		    desc->desc_type == NIC_RESOURCE_DESC_TYPE_V1)
 			break;
 
 		desc = (void *)desc + desc->desc_len;
@@ -3021,23 +3021,41 @@ err:
 	return status;
 }
 
- /* Uses sync mcc */
-int be_cmd_get_profile_config(struct be_adapter *adapter, u32 *cap_flags,
-			      u8 domain)
+/* Uses mbox */
+int be_cmd_get_profile_config_mbox(struct be_adapter *adapter,
+				   u8 domain, struct be_dma_mem *cmd)
 {
 	struct be_mcc_wrb *wrb;
 	struct be_cmd_req_get_profile_config *req;
 	int status;
-	struct be_dma_mem cmd;
 
-	memset(&cmd, 0, sizeof(struct be_dma_mem));
-	cmd.size = sizeof(struct be_cmd_resp_get_profile_config);
-	cmd.va = pci_alloc_consistent(adapter->pdev, cmd.size,
-				      &cmd.dma);
-	if (!cmd.va) {
-		dev_err(&adapter->pdev->dev, "Memory alloc failure\n");
-		return -ENOMEM;
-	}
+	if (mutex_lock_interruptible(&adapter->mbox_lock))
+		return -1;
+	wrb = wrb_from_mbox(adapter);
+
+	req = cmd->va;
+	be_wrb_cmd_hdr_prepare(&req->hdr, CMD_SUBSYSTEM_COMMON,
+			       OPCODE_COMMON_GET_PROFILE_CONFIG,
+			       cmd->size, wrb, cmd);
+
+	req->type = ACTIVE_PROFILE_TYPE;
+	req->hdr.domain = domain;
+	if (!lancer_chip(adapter))
+		req->hdr.version = 1;
+
+	status = be_mbox_notify_wait(adapter);
+
+	mutex_unlock(&adapter->mbox_lock);
+	return status;
+}
+
+/* Uses sync mcc */
+int be_cmd_get_profile_config_mccq(struct be_adapter *adapter,
+				   u8 domain, struct be_dma_mem *cmd)
+{
+	struct be_mcc_wrb *wrb;
+	struct be_cmd_req_get_profile_config *req;
+	int status;
 
 	spin_lock_bh(&adapter->mcc_lock);
 
@@ -3047,16 +3065,47 @@ int be_cmd_get_profile_config(struct be_adapter *adapter, u32 *cap_flags,
 		goto err;
 	}
 
-	req = cmd.va;
-
+	req = cmd->va;
 	be_wrb_cmd_hdr_prepare(&req->hdr, CMD_SUBSYSTEM_COMMON,
 			       OPCODE_COMMON_GET_PROFILE_CONFIG,
-			       cmd.size, wrb, &cmd);
+			       cmd->size, wrb, cmd);
 
 	req->type = ACTIVE_PROFILE_TYPE;
 	req->hdr.domain = domain;
+	if (!lancer_chip(adapter))
+		req->hdr.version = 1;
 
 	status = be_mcc_notify_wait(adapter);
+
+err:
+	spin_unlock_bh(&adapter->mcc_lock);
+	return status;
+}
+
+/* Uses sync mcc, if MCCQ is already created otherwise mbox */
+int be_cmd_get_profile_config(struct be_adapter *adapter, u32 *cap_flags,
+			      u16 *txq_count, u8 domain)
+{
+	struct be_queue_info *mccq = &adapter->mcc_obj.q;
+	struct be_dma_mem cmd;
+	int status;
+
+	memset(&cmd, 0, sizeof(struct be_dma_mem));
+	if (!lancer_chip(adapter))
+		cmd.size = sizeof(struct be_cmd_resp_get_profile_config_v1);
+	else
+		cmd.size = sizeof(struct be_cmd_resp_get_profile_config);
+	cmd.va = pci_alloc_consistent(adapter->pdev, cmd.size,
+				      &cmd.dma);
+	if (!cmd.va) {
+		dev_err(&adapter->pdev->dev, "Memory alloc failure\n");
+		return -ENOMEM;
+	}
+
+	if (!mccq->created)
+		status = be_cmd_get_profile_config_mbox(adapter, domain, &cmd);
+	else
+		status = be_cmd_get_profile_config_mccq(adapter, domain, &cmd);
 	if (!status) {
 		struct be_cmd_resp_get_profile_config *resp = cmd.va;
 		u32 desc_count = le32_to_cpu(resp->desc_count);
@@ -3069,12 +3118,15 @@ int be_cmd_get_profile_config(struct be_adapter *adapter, u32 *cap_flags,
 			status = -EINVAL;
 			goto err;
 		}
-		*cap_flags = le32_to_cpu(desc->cap_flags);
+		if (cap_flags)
+			*cap_flags = le32_to_cpu(desc->cap_flags);
+		if (txq_count)
+			*txq_count = le32_to_cpu(desc->txq_count);
 	}
 err:
-	spin_unlock_bh(&adapter->mcc_lock);
-	pci_free_consistent(adapter->pdev, cmd.size,
-			    cmd.va, cmd.dma);
+	if (cmd.va)
+		pci_free_consistent(adapter->pdev, cmd.size,
+				    cmd.va, cmd.dma);
 	return status;
 }
 
@@ -3103,7 +3155,7 @@ int be_cmd_set_profile_config(struct be_adapter *adapter, u32 bps,
 	req->hdr.domain = domain;
 	req->desc_count = cpu_to_le32(1);
 
-	req->nic_desc.desc_type = NIC_RESOURCE_DESC_TYPE_ID;
+	req->nic_desc.desc_type = NIC_RESOURCE_DESC_TYPE_V0;
 	req->nic_desc.desc_len = RESOURCE_DESC_SIZE;
 	req->nic_desc.flags = (1 << QUN) | (1 << IMM) | (1 << NOSV);
 	req->nic_desc.pf_num = adapter->pf_number;

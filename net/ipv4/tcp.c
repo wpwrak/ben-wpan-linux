@@ -2885,6 +2885,8 @@ struct sk_buff *tcp_tso_segment(struct sk_buff *skb,
 	__be32 delta;
 	unsigned int oldlen;
 	unsigned int mss;
+	struct sk_buff *gso_skb = skb;
+	__sum16 newcheck;
 
 	if (!pskb_may_pull(skb, sizeof(*th)))
 		goto out;
@@ -2935,11 +2937,13 @@ struct sk_buff *tcp_tso_segment(struct sk_buff *skb,
 	th = tcp_hdr(skb);
 	seq = ntohl(th->seq);
 
+	newcheck = ~csum_fold((__force __wsum)((__force u32)th->check +
+					       (__force u32)delta));
+
 	do {
 		th->fin = th->psh = 0;
+		th->check = newcheck;
 
-		th->check = ~csum_fold((__force __wsum)((__force u32)th->check +
-				       (__force u32)delta));
 		if (skb->ip_summed != CHECKSUM_PARTIAL)
 			th->check =
 			     csum_fold(csum_partial(skb_transport_header(skb),
@@ -2952,6 +2956,17 @@ struct sk_buff *tcp_tso_segment(struct sk_buff *skb,
 		th->seq = htonl(seq);
 		th->cwr = 0;
 	} while (skb->next);
+
+	/* Following permits TCP Small Queues to work well with GSO :
+	 * The callback to TCP stack will be called at the time last frag
+	 * is freed at TX completion, and not right now when gso_skb
+	 * is freed by GSO engine
+	 */
+	if (gso_skb->destructor == tcp_wfree) {
+		swap(gso_skb->sk, skb->sk);
+		swap(gso_skb->destructor, skb->destructor);
+		swap(gso_skb->truesize, skb->truesize);
+	}
 
 	delta = htonl(oldlen + (skb->tail - skb->transport_header) +
 		      skb->data_len);

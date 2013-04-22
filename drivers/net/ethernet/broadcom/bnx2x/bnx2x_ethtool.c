@@ -1364,11 +1364,27 @@ static int bnx2x_nvram_read(struct bnx2x *bp, u32 offset, u8 *ret_buf,
 	return rc;
 }
 
+static int bnx2x_nvram_read32(struct bnx2x *bp, u32 offset, u32 *buf,
+			      int buf_size)
+{
+	int rc;
+
+	rc = bnx2x_nvram_read(bp, offset, (u8 *)buf, buf_size);
+
+	if (!rc) {
+		__be32 *be = (__be32 *)buf;
+
+		while ((buf_size -= 4) >= 0)
+			*buf++ = be32_to_cpu(*be++);
+	}
+
+	return rc;
+}
+
 static int bnx2x_get_eeprom(struct net_device *dev,
 			    struct ethtool_eeprom *eeprom, u8 *eebuf)
 {
 	struct bnx2x *bp = netdev_priv(dev);
-	int rc;
 
 	if (!netif_running(dev)) {
 		DP(BNX2X_MSG_ETHTOOL  | BNX2X_MSG_NVM,
@@ -1383,9 +1399,7 @@ static int bnx2x_get_eeprom(struct net_device *dev,
 
 	/* parameters already validated in ethtool_get_eeprom */
 
-	rc = bnx2x_nvram_read(bp, eeprom->offset, eebuf, eeprom->len);
-
-	return rc;
+	return bnx2x_nvram_read(bp, eeprom->offset, eebuf, eeprom->len);
 }
 
 static int bnx2x_get_module_eeprom(struct net_device *dev,
@@ -1552,9 +1566,8 @@ static int bnx2x_nvram_write1(struct bnx2x *bp, u32 offset, u8 *data_buf,
 			      int buf_size)
 {
 	int rc;
-	u32 cmd_flags;
-	u32 align_offset;
-	__be32 val;
+	u32 cmd_flags, align_offset, val;
+	__be32 val_be;
 
 	if (offset + buf_size > bp->common.flash_size) {
 		DP(BNX2X_MSG_ETHTOOL | BNX2X_MSG_NVM,
@@ -1573,16 +1586,16 @@ static int bnx2x_nvram_write1(struct bnx2x *bp, u32 offset, u8 *data_buf,
 
 	cmd_flags = (MCPR_NVM_COMMAND_FIRST | MCPR_NVM_COMMAND_LAST);
 	align_offset = (offset & ~0x03);
-	rc = bnx2x_nvram_read_dword(bp, align_offset, &val, cmd_flags);
+	rc = bnx2x_nvram_read_dword(bp, align_offset, &val_be, cmd_flags);
 
 	if (rc == 0) {
-		val &= ~(0xff << BYTE_OFFSET(offset));
-		val |= (*data_buf << BYTE_OFFSET(offset));
-
 		/* nvram data is returned as an array of bytes
 		 * convert it back to cpu order
 		 */
-		val = be32_to_cpu(val);
+		val = be32_to_cpu(val_be);
+
+		val &= ~le32_to_cpu(0xff << BYTE_OFFSET(offset));
+		val |= le32_to_cpu(*data_buf << BYTE_OFFSET(offset));
 
 		rc = bnx2x_nvram_write_dword(bp, align_offset, val,
 					     cmd_flags);
@@ -2582,14 +2595,168 @@ static int bnx2x_test_ext_loopback(struct bnx2x *bp)
 	return rc;
 }
 
+struct code_entry {
+	u32 sram_start_addr;
+	u32 code_attribute;
+#define CODE_IMAGE_TYPE_MASK			0xf0800003
+#define CODE_IMAGE_VNTAG_PROFILES_DATA		0xd0000003
+#define CODE_IMAGE_LENGTH_MASK			0x007ffffc
+#define CODE_IMAGE_TYPE_EXTENDED_DIR		0xe0000000
+	u32 nvm_start_addr;
+};
+
+#define CODE_ENTRY_MAX			16
+#define CODE_ENTRY_EXTENDED_DIR_IDX	15
+#define MAX_IMAGES_IN_EXTENDED_DIR	64
+#define NVRAM_DIR_OFFSET		0x14
+
+#define EXTENDED_DIR_EXISTS(code)					  \
+	((code & CODE_IMAGE_TYPE_MASK) == CODE_IMAGE_TYPE_EXTENDED_DIR && \
+	 (code & CODE_IMAGE_LENGTH_MASK) != 0)
+
 #define CRC32_RESIDUAL			0xdebb20e3
+#define CRC_BUFF_SIZE			256
+
+static int bnx2x_nvram_crc(struct bnx2x *bp,
+			   int offset,
+			   int size,
+			   u8 *buff)
+{
+	u32 crc = ~0;
+	int rc = 0, done = 0;
+
+	DP(BNX2X_MSG_ETHTOOL | BNX2X_MSG_NVM,
+	   "NVRAM CRC from 0x%08x to 0x%08x\n", offset, offset + size);
+
+	while (done < size) {
+		int count = min_t(int, size - done, CRC_BUFF_SIZE);
+
+		rc = bnx2x_nvram_read(bp, offset + done, buff, count);
+
+		if (rc)
+			return rc;
+
+		crc = crc32_le(crc, buff, count);
+		done += count;
+	}
+
+	if (crc != CRC32_RESIDUAL)
+		rc = -EINVAL;
+
+	return rc;
+}
+
+static int bnx2x_test_nvram_dir(struct bnx2x *bp,
+				struct code_entry *entry,
+				u8 *buff)
+{
+	size_t size = entry->code_attribute & CODE_IMAGE_LENGTH_MASK;
+	u32 type = entry->code_attribute & CODE_IMAGE_TYPE_MASK;
+	int rc;
+
+	/* Zero-length images and AFEX profiles do not have CRC */
+	if (size == 0 || type == CODE_IMAGE_VNTAG_PROFILES_DATA)
+		return 0;
+
+	rc = bnx2x_nvram_crc(bp, entry->nvm_start_addr, size, buff);
+	if (rc)
+		DP(BNX2X_MSG_ETHTOOL | BNX2X_MSG_NVM,
+		   "image %x has failed crc test (rc %d)\n", type, rc);
+
+	return rc;
+}
+
+static int bnx2x_test_dir_entry(struct bnx2x *bp, u32 addr, u8 *buff)
+{
+	int rc;
+	struct code_entry entry;
+
+	rc = bnx2x_nvram_read32(bp, addr, (u32 *)&entry, sizeof(entry));
+	if (rc)
+		return rc;
+
+	return bnx2x_test_nvram_dir(bp, &entry, buff);
+}
+
+static int bnx2x_test_nvram_ext_dirs(struct bnx2x *bp, u8 *buff)
+{
+	u32 rc, cnt, dir_offset = NVRAM_DIR_OFFSET;
+	struct code_entry entry;
+	int i;
+
+	rc = bnx2x_nvram_read32(bp,
+				dir_offset +
+				sizeof(entry) * CODE_ENTRY_EXTENDED_DIR_IDX,
+				(u32 *)&entry, sizeof(entry));
+	if (rc)
+		return rc;
+
+	if (!EXTENDED_DIR_EXISTS(entry.code_attribute))
+		return 0;
+
+	rc = bnx2x_nvram_read32(bp, entry.nvm_start_addr,
+				&cnt, sizeof(u32));
+	if (rc)
+		return rc;
+
+	dir_offset = entry.nvm_start_addr + 8;
+
+	for (i = 0; i < cnt && i < MAX_IMAGES_IN_EXTENDED_DIR; i++) {
+		rc = bnx2x_test_dir_entry(bp, dir_offset +
+					      sizeof(struct code_entry) * i,
+					  buff);
+		if (rc)
+			return rc;
+	}
+
+	return 0;
+}
+
+static int bnx2x_test_nvram_dirs(struct bnx2x *bp, u8 *buff)
+{
+	u32 rc, dir_offset = NVRAM_DIR_OFFSET;
+	int i;
+
+	DP(BNX2X_MSG_ETHTOOL | BNX2X_MSG_NVM, "NVRAM DIRS CRC test-set\n");
+
+	for (i = 0; i < CODE_ENTRY_EXTENDED_DIR_IDX; i++) {
+		rc = bnx2x_test_dir_entry(bp, dir_offset +
+					      sizeof(struct code_entry) * i,
+					  buff);
+		if (rc)
+			return rc;
+	}
+
+	return bnx2x_test_nvram_ext_dirs(bp, buff);
+}
+
+struct crc_pair {
+	int offset;
+	int size;
+};
+
+static int bnx2x_test_nvram_tbl(struct bnx2x *bp,
+				const struct crc_pair *nvram_tbl, u8 *buf)
+{
+	int i;
+
+	for (i = 0; nvram_tbl[i].size; i++) {
+		int rc = bnx2x_nvram_crc(bp, nvram_tbl[i].offset,
+					 nvram_tbl[i].size, buf);
+		if (rc) {
+			DP(BNX2X_MSG_ETHTOOL | BNX2X_MSG_NVM,
+			   "nvram_tbl[%d] has failed crc test (rc %d)\n",
+			   i, rc);
+			return rc;
+		}
+	}
+
+	return 0;
+}
 
 static int bnx2x_test_nvram(struct bnx2x *bp)
 {
-	static const struct {
-		int offset;
-		int size;
-	} nvram_tbl[] = {
+	const struct crc_pair nvram_tbl[] = {
 		{     0,  0x14 }, /* bootstrap */
 		{  0x14,  0xec }, /* dir */
 		{ 0x100, 0x350 }, /* manuf_info */
@@ -2598,30 +2765,33 @@ static int bnx2x_test_nvram(struct bnx2x *bp)
 		{ 0x708,  0x70 }, /* manuf_key_info */
 		{     0,     0 }
 	};
-	__be32 *buf;
-	u8 *data;
-	int i, rc;
-	u32 magic, crc;
+	const struct crc_pair nvram_tbl2[] = {
+		{ 0x7e8, 0x350 }, /* manuf_info2 */
+		{ 0xb38,  0xf0 }, /* feature_info */
+		{     0,     0 }
+	};
+
+	u8 *buf;
+	int rc;
+	u32 magic;
 
 	if (BP_NOMCP(bp))
 		return 0;
 
-	buf = kmalloc(0x350, GFP_KERNEL);
+	buf = kmalloc(CRC_BUFF_SIZE, GFP_KERNEL);
 	if (!buf) {
 		DP(BNX2X_MSG_ETHTOOL | BNX2X_MSG_NVM, "kmalloc failed\n");
 		rc = -ENOMEM;
 		goto test_nvram_exit;
 	}
-	data = (u8 *)buf;
 
-	rc = bnx2x_nvram_read(bp, 0, data, 4);
+	rc = bnx2x_nvram_read32(bp, 0, &magic, sizeof(magic));
 	if (rc) {
 		DP(BNX2X_MSG_ETHTOOL | BNX2X_MSG_NVM,
 		   "magic value read (rc %d)\n", rc);
 		goto test_nvram_exit;
 	}
 
-	magic = be32_to_cpu(buf[0]);
 	if (magic != 0x669955aa) {
 		DP(BNX2X_MSG_ETHTOOL | BNX2X_MSG_NVM,
 		   "wrong magic value (0x%08x)\n", magic);
@@ -2629,24 +2799,25 @@ static int bnx2x_test_nvram(struct bnx2x *bp)
 		goto test_nvram_exit;
 	}
 
-	for (i = 0; nvram_tbl[i].size; i++) {
+	DP(BNX2X_MSG_ETHTOOL | BNX2X_MSG_NVM, "Port 0 CRC test-set\n");
+	rc = bnx2x_test_nvram_tbl(bp, nvram_tbl, buf);
+	if (rc)
+		goto test_nvram_exit;
 
-		rc = bnx2x_nvram_read(bp, nvram_tbl[i].offset, data,
-				      nvram_tbl[i].size);
-		if (rc) {
-			DP(BNX2X_MSG_ETHTOOL | BNX2X_MSG_NVM,
-			   "nvram_tbl[%d] read data (rc %d)\n", i, rc);
-			goto test_nvram_exit;
-		}
+	if (!CHIP_IS_E1x(bp) && !CHIP_IS_57811xx(bp)) {
+		u32 hide = SHMEM_RD(bp, dev_info.shared_hw_config.config2) &
+			   SHARED_HW_CFG_HIDE_PORT1;
 
-		crc = ether_crc_le(nvram_tbl[i].size, data);
-		if (crc != CRC32_RESIDUAL) {
+		if (!hide) {
 			DP(BNX2X_MSG_ETHTOOL | BNX2X_MSG_NVM,
-			   "nvram_tbl[%d] wrong crc value (0x%08x)\n", i, crc);
-			rc = -ENODEV;
-			goto test_nvram_exit;
+			   "Port 1 CRC test-set\n");
+			rc = bnx2x_test_nvram_tbl(bp, nvram_tbl2, buf);
+			if (rc)
+				goto test_nvram_exit;
 		}
 	}
+
+	rc = bnx2x_test_nvram_dirs(bp, buf);
 
 test_nvram_exit:
 	kfree(buf);
@@ -2693,9 +2864,16 @@ static void bnx2x_self_test(struct net_device *dev,
 
 	memset(buf, 0, sizeof(u64) * BNX2X_NUM_TESTS(bp));
 
+	if (bnx2x_test_nvram(bp) != 0) {
+		if (!IS_MF(bp))
+			buf[4] = 1;
+		else
+			buf[0] = 1;
+		etest->flags |= ETH_TEST_FL_FAILED;
+	}
+
 	if (!netif_running(dev)) {
-		DP(BNX2X_MSG_ETHTOOL,
-		   "Can't perform self-test when interface is down\n");
+		DP(BNX2X_MSG_ETHTOOL, "Interface is down\n");
 		return;
 	}
 
@@ -2757,13 +2935,7 @@ static void bnx2x_self_test(struct net_device *dev,
 		/* wait until link state is restored */
 		bnx2x_wait_for_link(bp, link_up, is_serdes);
 	}
-	if (bnx2x_test_nvram(bp) != 0) {
-		if (!IS_MF(bp))
-			buf[4] = 1;
-		else
-			buf[0] = 1;
-		etest->flags |= ETH_TEST_FL_FAILED;
-	}
+
 	if (bnx2x_test_intr(bp) != 0) {
 		if (!IS_MF(bp))
 			buf[5] = 1;

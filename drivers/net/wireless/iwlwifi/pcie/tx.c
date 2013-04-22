@@ -1262,7 +1262,7 @@ static int iwl_pcie_enqueue_hcmd(struct iwl_trans *trans,
 	for (i = 0; i < IWL_MAX_CMD_TBS_PER_TFD; i++) {
 		int copy = 0;
 
-		if (!cmd->len)
+		if (!cmd->len[i])
 			continue;
 
 		/* need at least IWL_HCMD_SCRATCHBUF_SIZE copied */
@@ -1564,8 +1564,11 @@ int iwl_trans_pcie_send_hcmd(struct iwl_trans *trans, struct iwl_host_cmd *cmd)
 	if (test_bit(STATUS_FW_ERROR, &trans_pcie->status))
 		return -EIO;
 
-	if (test_bit(STATUS_RFKILL, &trans_pcie->status))
+	if (test_bit(STATUS_RFKILL, &trans_pcie->status)) {
+		IWL_DEBUG_RF_KILL(trans, "Dropping CMD 0x%x: RF KILL\n",
+				  cmd->id);
 		return -ERFKILL;
+	}
 
 	if (cmd->flags & CMD_ASYNC)
 		return iwl_pcie_send_hcmd_async(trans, cmd);

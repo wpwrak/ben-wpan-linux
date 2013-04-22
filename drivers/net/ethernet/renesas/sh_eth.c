@@ -1517,10 +1517,7 @@ static void sh_eth_error(struct net_device *ndev, int intr_status)
 		if (felic_stat & ECSR_LCHNG) {
 			/* Link Changed */
 			if (mdp->cd->no_psr || mdp->no_ether_link) {
-				if (mdp->link == PHY_DOWN)
-					link_stat = 0;
-				else
-					link_stat = PHY_ST_LINK;
+				goto ignore_link;
 			} else {
 				link_stat = (sh_eth_read(ndev, PSR));
 				if (mdp->ether_link_active_low)
@@ -1543,6 +1540,7 @@ static void sh_eth_error(struct net_device *ndev, int intr_status)
 		}
 	}
 
+ignore_link:
 	if (intr_status & EESR_TWB) {
 		/* Write buck end. unused write back interrupt */
 		if (intr_status & EESR_TABT)	/* Transmit Abort int */
@@ -1627,12 +1625,18 @@ static irqreturn_t sh_eth_interrupt(int irq, void *netdev)
 	struct sh_eth_private *mdp = netdev_priv(ndev);
 	struct sh_eth_cpu_data *cd = mdp->cd;
 	irqreturn_t ret = IRQ_NONE;
-	u32 intr_status = 0;
+	unsigned long intr_status;
 
 	spin_lock(&mdp->lock);
 
-	/* Get interrpt stat */
+	/* Get interrupt status */
 	intr_status = sh_eth_read(ndev, EESR);
+	/* Mask it with the interrupt mask, forcing ECI interrupt to be always
+	 * enabled since it's the one that  comes thru regardless of the mask,
+	 * and we need to fully handle it in sh_eth_error() in order to quench
+	 * it as it doesn't get cleared by just writing 1 to the ECI bit...
+	 */
+	intr_status &= sh_eth_read(ndev, EESIPR) | DMAC_M_ECI;
 	/* Clear interrupt */
 	if (intr_status & (EESR_FRC | EESR_RMAF | EESR_RRF |
 			EESR_RTLF | EESR_RTSF | EESR_PRE | EESR_CERF |
@@ -1674,7 +1678,7 @@ static void sh_eth_adjust_link(struct net_device *ndev)
 	struct phy_device *phydev = mdp->phydev;
 	int new_state = 0;
 
-	if (phydev->link != PHY_DOWN) {
+	if (phydev->link) {
 		if (phydev->duplex != mdp->duplex) {
 			new_state = 1;
 			mdp->duplex = phydev->duplex;
@@ -1688,17 +1692,21 @@ static void sh_eth_adjust_link(struct net_device *ndev)
 			if (mdp->cd->set_rate)
 				mdp->cd->set_rate(ndev);
 		}
-		if (mdp->link == PHY_DOWN) {
+		if (!mdp->link) {
 			sh_eth_write(ndev,
 				(sh_eth_read(ndev, ECMR) & ~ECMR_TXF), ECMR);
 			new_state = 1;
 			mdp->link = phydev->link;
+			if (mdp->cd->no_psr || mdp->no_ether_link)
+				sh_eth_rcv_snd_enable(ndev);
 		}
 	} else if (mdp->link) {
 		new_state = 1;
-		mdp->link = PHY_DOWN;
+		mdp->link = 0;
 		mdp->speed = 0;
 		mdp->duplex = -1;
+		if (mdp->cd->no_psr || mdp->no_ether_link)
+			sh_eth_rcv_snd_disable(ndev);
 	}
 
 	if (new_state && netif_msg_link(mdp))
@@ -1715,7 +1723,7 @@ static int sh_eth_phy_init(struct net_device *ndev)
 	snprintf(phy_id, sizeof(phy_id), PHY_ID_FMT,
 		mdp->mii_bus->id , mdp->phy_id);
 
-	mdp->link = PHY_DOWN;
+	mdp->link = 0;
 	mdp->speed = 0;
 	mdp->duplex = -1;
 
@@ -2440,7 +2448,8 @@ static int sh_eth_get_vtag_index(struct sh_eth_private *mdp)
 		return TSU_VTAG1;
 }
 
-static int sh_eth_vlan_rx_add_vid(struct net_device *ndev, u16 vid)
+static int sh_eth_vlan_rx_add_vid(struct net_device *ndev,
+				  __be16 proto, u16 vid)
 {
 	struct sh_eth_private *mdp = netdev_priv(ndev);
 	int vtag_reg_index = sh_eth_get_vtag_index(mdp);
@@ -2470,7 +2479,8 @@ static int sh_eth_vlan_rx_add_vid(struct net_device *ndev, u16 vid)
 	return 0;
 }
 
-static int sh_eth_vlan_rx_kill_vid(struct net_device *ndev, u16 vid)
+static int sh_eth_vlan_rx_kill_vid(struct net_device *ndev,
+				   __be16 proto, u16 vid)
 {
 	struct sh_eth_private *mdp = netdev_priv(ndev);
 	int vtag_reg_index = sh_eth_get_vtag_index(mdp);
@@ -2741,7 +2751,7 @@ static int sh_eth_drv_probe(struct platform_device *pdev)
 			goto out_release;
 		}
 		mdp->port = devno % 2;
-		ndev->features = NETIF_F_HW_VLAN_FILTER;
+		ndev->features = NETIF_F_HW_VLAN_CTAG_FILTER;
 	}
 
 	/* initialize first or needed device */

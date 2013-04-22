@@ -787,7 +787,7 @@ void __init tcp_tasklet_init(void)
  * We cant xmit new skbs from this context, as we might already
  * hold qdisc lock.
  */
-static void tcp_wfree(struct sk_buff *skb)
+void tcp_wfree(struct sk_buff *skb)
 {
 	struct sock *sk = skb->sk;
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -846,6 +846,13 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
 		__net_timestamp(skb);
 
 	if (likely(clone_it)) {
+		const struct sk_buff *fclone = skb + 1;
+
+		if (unlikely(skb->fclone == SKB_FCLONE_ORIG &&
+			     fclone->fclone == SKB_FCLONE_CLONE))
+			NET_INC_STATS_BH(sock_net(sk),
+					 LINUX_MIB_TCPSPURIOUS_RTX_HOSTQUEUES);
+
 		if (unlikely(skb_cloned(skb)))
 			skb = pskb_copy(skb, gfp_mask);
 		else
