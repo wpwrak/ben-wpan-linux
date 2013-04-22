@@ -1010,8 +1010,8 @@ err_rstn:
 
 static int at86rf230_remove(struct spi_device *spi)
 {
+	struct at86rf230_platform_data *pdata = spi->dev.platform_data;
 	struct at86rf230_local *lp = spi_get_drvdata(spi);
-	struct at86rf230_platform_data *pdata = lp->spi->dev.platform_data;
 
 	ieee802154_unregister_device(lp->dev);
 
