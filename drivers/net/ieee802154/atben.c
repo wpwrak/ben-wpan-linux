@@ -19,6 +19,12 @@
 #include <asm/mach-jz4740/gpio.h>
 
 
+#ifdef CONFIG_SPI_JZ4740_GPIO
+#define	SPI_GPIO_DRIVER	"spi_jz4740_gpio",
+#else
+#define	SPI_GPIO_DRIVER	"spi_gpio"
+#endif
+
 enum {
 	VDD_OFF	= 2,	/* VDD disable, PD02 */
 	MOSI	= 8,	/* CMD, PD08 */
@@ -37,6 +43,15 @@ static void atben_reset(void *dummy)
 {
 	const int charge = 1 << nSEL | 1 << MOSI | 1 << SLP_TR | 1 << SCLK;
 	const int discharge = charge | 1 << IRQ | 1 << MISO;
+
+#ifndef CONFIG_SPI_JZ4740_GPIO
+	jz_gpio_set_function(JZ_GPIO_PORTD(MOSI), JZ_GPIO_FUNC_NONE);
+	jz_gpio_set_function(JZ_GPIO_PORTD(MISO), JZ_GPIO_FUNC_NONE);
+	jz_gpio_set_function(JZ_GPIO_PORTD(SCLK), JZ_GPIO_FUNC_NONE);
+	jz_gpio_set_function(JZ_GPIO_PORTD(nSEL), JZ_GPIO_FUNC_NONE);
+#endif
+	jz_gpio_set_function(JZ_GPIO_PORTD(SLP_TR), JZ_GPIO_FUNC_NONE);
+	jz_gpio_set_function(JZ_GPIO_PORTD(IRQ), JZ_GPIO_FUNC_NONE);
 
 	jz_gpio_port_set_value(JZ_GPIO_PORTD(0), 1 << VDD_OFF, 1 << VDD_OFF);
 	jz_gpio_port_direction_output(JZ_GPIO_PORTD(0), discharge);
@@ -86,13 +101,7 @@ struct spi_gpio_platform_data atben_spi_gpio_platform_data = {
 };
 
 static struct platform_device atben_device = {
-#if defined(CONFIG_SPI_JZ4740_GPIO)
-	.name	= "spi_jz4740_gpio",
-#elif defined(CONFIG_SPI_GPIO_ATBEN)
-	.name	= "spi_gpio_atben",
-#else
-	.name	= "spi_gpio",
-#endif
+	.name	= SPI_GPIO_DRIVER,
 	.id	= 2,
 	.dev	= {
 		.platform_data = &atben_spi_gpio_platform_data,
@@ -101,15 +110,6 @@ static struct platform_device atben_device = {
 
 static int __init atben_init(void)
 {
-#ifndef CONFIG_SPI_JZ4740_GPIO
-	jz_gpio_set_function(JZ_GPIO_PORTD(MOSI), JZ_GPIO_FUNC_NONE);
-	jz_gpio_set_function(JZ_GPIO_PORTD(MISO), JZ_GPIO_FUNC_NONE);
-	jz_gpio_set_function(JZ_GPIO_PORTD(SCLK), JZ_GPIO_FUNC_NONE);
-	jz_gpio_set_function(JZ_GPIO_PORTD(nSEL), JZ_GPIO_FUNC_NONE);
-#endif
-	jz_gpio_set_function(JZ_GPIO_PORTD(SLP_TR), JZ_GPIO_FUNC_NONE);
-	jz_gpio_set_function(JZ_GPIO_PORTD(IRQ), JZ_GPIO_FUNC_NONE);
-
 	atben_board_info.irq = gpio_to_irq(JZ_GPIO_PORTD(IRQ));
 	spi_register_board_info(&atben_board_info, 1);
 
