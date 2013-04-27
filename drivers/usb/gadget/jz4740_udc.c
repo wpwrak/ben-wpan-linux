@@ -37,7 +37,6 @@
 #include <asm/byteorder.h>
 #include <asm/io.h>
 #include <asm/irq.h>
-#include <asm/system.h>
 #include <asm/mach-jz4740/clock.h>
 
 #include "jz4740_udc.h"
@@ -160,9 +159,10 @@ static struct jz4740_udc jz4740_udc_controller;
 /*
  * Local declarations.
  */
-static int jz4740_udc_start(struct usb_gadget_driver *driver,
-		int (*bind)(struct usb_gadget *));
-static int jz4740_udc_stop(struct usb_gadget_driver *driver);
+static int jz4740_udc_start(struct usb_gadget *g,
+			    struct usb_gadget_driver *driver);
+static int jz4740_udc_stop(struct usb_gadget *g,
+			   struct usb_gadget_driver *driver);
 static void jz4740_ep0_kick(struct jz4740_udc *dev, struct jz4740_ep *ep);
 static void jz4740_handle_ep0(struct jz4740_udc *dev, uint32_t intr);
 
@@ -334,6 +334,8 @@ static void udc_reinit(struct jz4740_udc *dev)
 	INIT_LIST_HEAD(&dev->gadget.ep0->ep_list);
 	dev->ep0state = WAIT_FOR_SETUP;
 
+	dev->gadget.max_speed = USB_SPEED_HIGH;
+
 	for (i = 0; i < UDC_MAX_ENDPOINTS; i++) {
 		struct jz4740_ep *ep = &dev->ep[i];
 
@@ -416,36 +418,15 @@ static void udc_enable(struct jz4740_udc *dev)
  * Register entry point for the peripheral controller driver.
  */
 
-static int jz4740_udc_start(struct usb_gadget_driver *driver,
-		int (*bind)(struct usb_gadget *))
+static int jz4740_udc_start(struct usb_gadget *g,
+			    struct usb_gadget_driver *driver)
 {
-	struct jz4740_udc *dev = &jz4740_udc_controller;
-	int retval;
-
-	if (!driver || !bind)
-		return -EINVAL;
-
-	if (!dev)
-		return -ENODEV;
-
-	if (dev->driver)
-		return -EBUSY;
+	struct jz4740_udc *dev = to_jz4740_udc(g);
 
 	/* hook up the driver */
 	dev->driver = driver;
 	dev->gadget.dev.driver = &driver->driver;
 
-	retval = bind(&dev->gadget);
-	if (retval) {
-		DEBUG("%s: bind to driver %s --> error %d\n", dev->gadget.name,
-		            driver->driver.name, retval);
-		dev->driver = 0;
-		return retval;
-	}
-
-	/* then enable host detection and ep0; and we're ready
-	 * for set_configuration as well as eventual disconnect.
-	 */
 	udc_enable(dev);
 
 	DEBUG("%s: registered gadget driver '%s'\n", dev->gadget.name,
@@ -491,18 +472,12 @@ static void stop_activity(struct jz4740_udc *dev,
 /*
  * Unregister entry point for the peripheral controller driver.
  */
-static int jz4740_udc_stop(struct usb_gadget_driver *driver)
+static int jz4740_udc_stop(struct usb_gadget *g,
+			   struct usb_gadget_driver *driver)
 {
-	struct jz4740_udc *dev = &jz4740_udc_controller;
+	struct jz4740_udc *dev = to_jz4740_udc(g);
 	unsigned long flags;
 	DEBUG("%s:%s[%d]\n", __FILE__, __func__, __LINE__);
-
-	if (!dev)
-		return -ENODEV;
-	if (!driver || driver != dev->driver)
-		return -EINVAL;
-	if (!driver->unbind)
-		return -EBUSY;
 
 	spin_lock_irqsave(&dev->lock, flags);
 	dev->driver = 0;
@@ -1933,11 +1908,11 @@ static int jz4740_udc_pullup(struct usb_gadget *_gadget, int on)
 
 
 static const struct usb_gadget_ops jz4740_udc_ops = {
-	.get_frame = jz4740_udc_get_frame,
-	.wakeup = jz4740_udc_wakeup,
-	.pullup = jz4740_udc_pullup,
-	.start = jz4740_udc_start,
-	.stop = jz4740_udc_stop,
+	.get_frame	= jz4740_udc_get_frame,
+	.wakeup		= jz4740_udc_wakeup,
+	.pullup		= jz4740_udc_pullup,
+	.udc_start	= jz4740_udc_start,
+	.udc_stop	= jz4740_udc_stop,
 };
 
 static struct usb_ep_ops jz4740_ep_ops = {
@@ -2037,7 +2012,7 @@ static struct jz4740_udc jz4740_udc_controller = {
 	},
 };
 
-static int __devinit jz4740_udc_probe(struct platform_device *pdev)
+static int jz4740_udc_probe(struct platform_device *pdev)
 {
 	struct jz4740_udc *jz4740_udc = &jz4740_udc_controller;
 	int ret;
@@ -2120,7 +2095,7 @@ err_device_unregister:
 	return ret;
 }
 
-static int __devexit jz4740_udc_remove(struct platform_device *pdev)
+static int jz4740_udc_remove(struct platform_device *pdev)
 {
 	struct jz4740_udc *dev = platform_get_drvdata(pdev);
 
@@ -2172,7 +2147,7 @@ static SIMPLE_DEV_PM_OPS(jz4740_udc_pm_ops, jz4740_udc_suspend, jz4740_udc_resum
 
 static struct platform_driver udc_driver = {
 	.probe		= jz4740_udc_probe,
-	.remove		= __devexit_p(jz4740_udc_remove),
+	.remove		= jz4740_udc_remove,
 	.driver		= {
 		.name	= "jz-udc",
 		.owner	= THIS_MODULE,

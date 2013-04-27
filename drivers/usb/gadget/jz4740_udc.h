@@ -86,6 +86,7 @@ struct jz4740_udc {
 	struct clk *clk;
 };
 
+#define	to_jz4740_udc(g)	(container_of((g), struct jz4740_udc, gadget))
 #define ep_maxpacket(EP) 	((EP)->ep.maxpacket)
 
 static inline bool ep_is_in(const struct jz4740_ep *ep)
