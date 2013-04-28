@@ -389,6 +389,8 @@ static int spi_jz4740_gpio_remove(struct platform_device *pdev)
 
 	spi_unregister_master(master);
 
+	free_gpios(prv);
+
 	iounmap(prv->port_base);
 
 	release_resource(prv->ioarea);
