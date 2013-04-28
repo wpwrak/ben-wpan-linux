@@ -9,6 +9,20 @@
  * as published by the Free Software Foundation.
  */
 
+/*
+ * This is a drop-in replacement for spi-gpio.c, optimized for Jz4740-based
+ * systems. It is about six times faster than its generic counterpart.
+ *
+ * There are only two usage differences:
+ *
+ * 1) struct platform_device.name must be "spi_jz4740_gpio" instead of
+ *    "spi_gpio", and
+ *
+ * 2) MOSI, MISO, and SCK must be on the same port. Driver probing fails
+ *    if they are not.
+ */
+
+
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
