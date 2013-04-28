@@ -19,7 +19,7 @@
 #include <asm/mach-jz4740/gpio.h>
 
 
-#ifdef CONFIG_SPI_JZ4740_GPIO
+#if defined(CONFIG_SPI_JZ4740_GPIO) || defined(CONFIG_SPI_JZ4740_GPIO_MODULE)
 #define	SPI_GPIO_DRIVER	"spi_jz4740_gpio"
 #else
 #define	SPI_GPIO_DRIVER	"spi_gpio"
