@@ -200,7 +200,7 @@ static inline void rps_unlock(struct softnet_data *sd)
 }
 
 /* Device list insertion */
-static int list_netdevice(struct net_device *dev)
+static void list_netdevice(struct net_device *dev)
 {
 	struct net *net = dev_net(dev);
 
@@ -214,8 +214,6 @@ static int list_netdevice(struct net_device *dev)
 	write_unlock_bh(&dev_base_lock);
 
 	dev_base_seq_inc(net);
-
-	return 0;
 }
 
 /* Device list removal
@@ -2148,6 +2146,9 @@ static void skb_warn_bad_offload(const struct sk_buff *skb)
 	struct net_device *dev = skb->dev;
 	const char *driver = "";
 
+	if (!net_ratelimit())
+		return;
+
 	if (dev && dev->dev.parent)
 		driver = dev_driver_string(dev->dev.parent);
 
@@ -2544,13 +2545,6 @@ gso:
 
 		skb->next = nskb->next;
 		nskb->next = NULL;
-
-		/*
-		 * If device doesn't need nskb->dst, release it right now while
-		 * its hot in this cpu cache
-		 */
-		if (dev->priv_flags & IFF_XMIT_DST_RELEASE)
-			skb_dst_drop(nskb);
 
 		if (!list_empty(&ptype_all))
 			dev_queue_xmit_nit(nskb, dev);

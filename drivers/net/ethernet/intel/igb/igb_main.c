@@ -60,9 +60,9 @@
 #include <linux/i2c.h>
 #include "igb.h"
 
-#define MAJ 4
-#define MIN 1
-#define BUILD 2
+#define MAJ 5
+#define MIN 0
+#define BUILD 3
 #define DRV_VERSION __stringify(MAJ) "." __stringify(MIN) "." \
 __stringify(BUILD) "-k"
 char igb_driver_name[] = "igb";
@@ -180,7 +180,6 @@ static void igb_check_vf_rate_limit(struct igb_adapter *);
 
 #ifdef CONFIG_PCI_IOV
 static int igb_vf_configure(struct igb_adapter *adapter, int vf);
-static bool igb_vfs_are_assigned(struct igb_adapter *adapter);
 #endif
 
 #ifdef CONFIG_PM
@@ -2402,7 +2401,7 @@ static int  igb_disable_sriov(struct pci_dev *pdev)
 	/* reclaim resources allocated to VFs */
 	if (adapter->vf_data) {
 		/* disable iov and allow time for transactions to clear */
-		if (igb_vfs_are_assigned(adapter)) {
+		if (pci_vfs_assigned(pdev)) {
 			dev_warn(&pdev->dev,
 				 "Cannot deallocate SR-IOV virtual functions while they are assigned - VFs will not be deallocated\n");
 			return -EPERM;
@@ -3387,20 +3386,6 @@ void igb_configure_rx_ring(struct igb_adapter *adapter,
 	wr32(E1000_RXDCTL(reg_idx), rxdctl);
 }
 
-static void igb_set_rx_buffer_len(struct igb_adapter *adapter,
-				  struct igb_ring *rx_ring)
-{
-#define IGB_MAX_BUILD_SKB_SIZE \
-	(SKB_WITH_OVERHEAD(IGB_RX_BUFSZ) - \
-	 (NET_SKB_PAD + NET_IP_ALIGN + IGB_TS_HDR_LEN))
-
-	/* set build_skb flag */
-	if (adapter->max_frame_size <= IGB_MAX_BUILD_SKB_SIZE)
-		set_ring_build_skb_enabled(rx_ring);
-	else
-		clear_ring_build_skb_enabled(rx_ring);
-}
-
 /**
  *  igb_configure_rx - Configure receive Unit after Reset
  *  @adapter: board private structure
@@ -3421,11 +3406,8 @@ static void igb_configure_rx(struct igb_adapter *adapter)
 	/* Setup the HW Rx Head and Tail Descriptor Pointers and
 	 * the Base and Length of the Rx Descriptor Ring
 	 */
-	for (i = 0; i < adapter->num_rx_queues; i++) {
-		struct igb_ring *rx_ring = adapter->rx_ring[i];
-		igb_set_rx_buffer_len(adapter, rx_ring);
-		igb_configure_rx_ring(adapter, rx_ring);
-	}
+	for (i = 0; i < adapter->num_rx_queues; i++)
+		igb_configure_rx_ring(adapter, adapter->rx_ring[i]);
 }
 
 /**
@@ -3754,6 +3736,10 @@ static void igb_set_rx_mode(struct net_device *netdev)
 	rctl &= ~(E1000_RCTL_UPE | E1000_RCTL_MPE | E1000_RCTL_VFE);
 
 	if (netdev->flags & IFF_PROMISC) {
+		u32 mrqc = rd32(E1000_MRQC);
+		/* retain VLAN HW filtering if in VT mode */
+		if (mrqc & E1000_MRQC_ENABLE_VMDQ)
+			rctl |= E1000_RCTL_VFE;
 		rctl |= (E1000_RCTL_UPE | E1000_RCTL_MPE);
 		vmolr |= (E1000_VMOLR_ROPE | E1000_VMOLR_MPME);
 	} else {
@@ -3919,6 +3905,7 @@ static void igb_watchdog_task(struct work_struct *work)
 						   struct igb_adapter,
 						   watchdog_task);
 	struct e1000_hw *hw = &adapter->hw;
+	struct e1000_phy_info *phy = &hw->phy;
 	struct net_device *netdev = adapter->netdev;
 	u32 link;
 	int i;
@@ -3946,6 +3933,11 @@ static void igb_watchdog_task(struct work_struct *work)
 			       (ctrl & E1000_CTRL_RFCE) ? "RX/TX" :
 			       (ctrl & E1000_CTRL_RFCE) ?  "RX" :
 			       (ctrl & E1000_CTRL_TFCE) ?  "TX" : "None");
+
+			/* check if SmartSpeed worked */
+			igb_check_downshift(hw);
+			if (phy->speed_downgraded)
+				netdev_warn(netdev, "Link Speed was downgraded by SmartSpeed\n");
 
 			/* check for thermal sensor event */
 			if (igb_thermal_sensor_event(hw,
@@ -5259,39 +5251,6 @@ static int igb_vf_configure(struct igb_adapter *adapter, int vf)
 	return 0;
 }
 
-static bool igb_vfs_are_assigned(struct igb_adapter *adapter)
-{
-	struct pci_dev *pdev = adapter->pdev;
-	struct pci_dev *vfdev;
-	int dev_id;
-
-	switch (adapter->hw.mac.type) {
-	case e1000_82576:
-		dev_id = IGB_82576_VF_DEV_ID;
-		break;
-	case e1000_i350:
-		dev_id = IGB_I350_VF_DEV_ID;
-		break;
-	default:
-		return false;
-	}
-
-	/* loop through all the VFs to see if we own any that are assigned */
-	vfdev = pci_get_device(PCI_VENDOR_ID_INTEL, dev_id, NULL);
-	while (vfdev) {
-		/* if we don't own it we don't care */
-		if (vfdev->is_virtfn && vfdev->physfn == pdev) {
-			/* if it is assigned we cannot release it */
-			if (vfdev->dev_flags & PCI_DEV_FLAGS_ASSIGNED)
-				return true;
-		}
-
-		vfdev = pci_get_device(PCI_VENDOR_ID_INTEL, dev_id, vfdev);
-	}
-
-	return false;
-}
-
 #endif
 static void igb_ping_all_vfs(struct igb_adapter *adapter)
 {
@@ -5565,12 +5524,75 @@ out:
 	return err;
 }
 
+static int igb_find_vlvf_entry(struct igb_adapter *adapter, int vid)
+{
+	struct e1000_hw *hw = &adapter->hw;
+	int i;
+	u32 reg;
+
+	/* Find the vlan filter for this id */
+	for (i = 0; i < E1000_VLVF_ARRAY_SIZE; i++) {
+		reg = rd32(E1000_VLVF(i));
+		if ((reg & E1000_VLVF_VLANID_ENABLE) &&
+		    vid == (reg & E1000_VLVF_VLANID_MASK))
+			break;
+	}
+
+	if (i >= E1000_VLVF_ARRAY_SIZE)
+		i = -1;
+
+	return i;
+}
+
 static int igb_set_vf_vlan(struct igb_adapter *adapter, u32 *msgbuf, u32 vf)
 {
+	struct e1000_hw *hw = &adapter->hw;
 	int add = (msgbuf[0] & E1000_VT_MSGINFO_MASK) >> E1000_VT_MSGINFO_SHIFT;
 	int vid = (msgbuf[1] & E1000_VLVF_VLANID_MASK);
+	int err = 0;
 
-	return igb_vlvf_set(adapter, vid, add, vf);
+	/* If in promiscuous mode we need to make sure the PF also has
+	 * the VLAN filter set.
+	 */
+	if (add && (adapter->netdev->flags & IFF_PROMISC))
+		err = igb_vlvf_set(adapter, vid, add,
+				   adapter->vfs_allocated_count);
+	if (err)
+		goto out;
+
+	err = igb_vlvf_set(adapter, vid, add, vf);
+
+	if (err)
+		goto out;
+
+	/* Go through all the checks to see if the VLAN filter should
+	 * be wiped completely.
+	 */
+	if (!add && (adapter->netdev->flags & IFF_PROMISC)) {
+		u32 vlvf, bits;
+
+		int regndx = igb_find_vlvf_entry(adapter, vid);
+		if (regndx < 0)
+			goto out;
+		/* See if any other pools are set for this VLAN filter
+		 * entry other than the PF.
+		 */
+		vlvf = bits = rd32(E1000_VLVF(regndx));
+		bits &= 1 << (E1000_VLVF_POOLSEL_SHIFT +
+			      adapter->vfs_allocated_count);
+		/* If the filter was removed then ensure PF pool bit
+		 * is cleared if the PF only added itself to the pool
+		 * because the PF is in promiscuous mode.
+		 */
+		if ((vlvf & VLAN_VID_MASK) == vid &&
+		    !test_bit(vid, adapter->active_vlans) &&
+		    !bits)
+			igb_vlvf_set(adapter, vid, add,
+				     adapter->vfs_allocated_count);
+	}
+
+out:
+	return err;
 }
 
 static inline void igb_vf_reset(struct igb_adapter *adapter, u32 vf)
@@ -6238,78 +6260,6 @@ static bool igb_add_rx_frag(struct igb_ring *rx_ring,
 	return igb_can_reuse_rx_page(rx_buffer, page, truesize);
 }
 
-static struct sk_buff *igb_build_rx_buffer(struct igb_ring *rx_ring,
-					   union e1000_adv_rx_desc *rx_desc)
-{
-	struct igb_rx_buffer *rx_buffer;
-	struct sk_buff *skb;
-	struct page *page;
-	void *page_addr;
-	unsigned int size = le16_to_cpu(rx_desc->wb.upper.length);
-#if (PAGE_SIZE < 8192)
-	unsigned int truesize = IGB_RX_BUFSZ;
-#else
-	unsigned int truesize = SKB_DATA_ALIGN(sizeof(struct skb_shared_info)) +
-				SKB_DATA_ALIGN(NET_SKB_PAD +
-					       NET_IP_ALIGN +
-					       size);
-#endif
-
-	/* If we spanned a buffer we have a huge mess so test for it */
-	BUG_ON(unlikely(!igb_test_staterr(rx_desc, E1000_RXD_STAT_EOP)));
-
-	rx_buffer = &rx_ring->rx_buffer_info[rx_ring->next_to_clean];
-	page = rx_buffer->page;
-	prefetchw(page);
-
-	page_addr = page_address(page) + rx_buffer->page_offset;
-
-	/* prefetch first cache line of first page */
-	prefetch(page_addr + NET_SKB_PAD + NET_IP_ALIGN);
-#if L1_CACHE_BYTES < 128
-	prefetch(page_addr + L1_CACHE_BYTES + NET_SKB_PAD + NET_IP_ALIGN);
-#endif
-
-	/* build an skb to around the page buffer */
-	skb = build_skb(page_addr, truesize);
-	if (unlikely(!skb)) {
-		rx_ring->rx_stats.alloc_failed++;
-		return NULL;
-	}
-
-	/* we are reusing so sync this buffer for CPU use */
-	dma_sync_single_range_for_cpu(rx_ring->dev,
-				      rx_buffer->dma,
-				      rx_buffer->page_offset,
-				      IGB_RX_BUFSZ,
-				      DMA_FROM_DEVICE);
-
-	/* update pointers within the skb to store the data */
-	skb_reserve(skb, NET_IP_ALIGN + NET_SKB_PAD);
-	__skb_put(skb, size);
-
-	/* pull timestamp out of packet data */
-	if (igb_test_staterr(rx_desc, E1000_RXDADV_STAT_TSIP)) {
-		igb_ptp_rx_pktstamp(rx_ring->q_vector, skb->data, skb);
-		__skb_pull(skb, IGB_TS_HDR_LEN);
-	}
-
-	if (igb_can_reuse_rx_page(rx_buffer, page, truesize)) {
-		/* hand second half of page back to the ring */
-		igb_reuse_rx_page(rx_ring, rx_buffer);
-	} else {
-		/* we are not reusing the buffer so unmap it */
-		dma_unmap_page(rx_ring->dev, rx_buffer->dma,
-			       PAGE_SIZE, DMA_FROM_DEVICE);
-	}
-
-	/* clear contents of buffer_info */
-	rx_buffer->dma = 0;
-	rx_buffer->page = NULL;
-
-	return skb;
-}
-
 static struct sk_buff *igb_fetch_rx_buffer(struct igb_ring *rx_ring,
 					   union e1000_adv_rx_desc *rx_desc,
 					   struct sk_buff *skb)
@@ -6719,10 +6669,7 @@ static bool igb_clean_rx_irq(struct igb_q_vector *q_vector, const int budget)
 		rmb();
 
 		/* retrieve a buffer from the ring */
-		if (ring_uses_build_skb(rx_ring))
-			skb = igb_build_rx_buffer(rx_ring, rx_desc);
-		else
-			skb = igb_fetch_rx_buffer(rx_ring, rx_desc, skb);
+		skb = igb_fetch_rx_buffer(rx_ring, rx_desc, skb);
 
 		/* exit if we failed to retrieve a buffer */
 		if (!skb)
@@ -6808,14 +6755,6 @@ static bool igb_alloc_mapped_page(struct igb_ring *rx_ring,
 	return true;
 }
 
-static inline unsigned int igb_rx_offset(struct igb_ring *rx_ring)
-{
-	if (ring_uses_build_skb(rx_ring))
-		return NET_SKB_PAD + NET_IP_ALIGN;
-	else
-		return 0;
-}
-
 /**
  *  igb_alloc_rx_buffers - Replace used receive buffers; packet split
  *  @adapter: address of board private structure
@@ -6841,9 +6780,7 @@ void igb_alloc_rx_buffers(struct igb_ring *rx_ring, u16 cleaned_count)
 		/* Refresh the desc even if buffer_addrs didn't change
 		 * because each write-back erases this info.
 		 */
-		rx_desc->read.pkt_addr = cpu_to_le64(bi->dma +
-						     bi->page_offset +
-						     igb_rx_offset(rx_ring));
+		rx_desc->read.pkt_addr = cpu_to_le64(bi->dma + bi->page_offset);
 
 		rx_desc++;
 		bi++;

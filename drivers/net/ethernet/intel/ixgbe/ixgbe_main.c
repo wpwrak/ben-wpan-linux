@@ -2095,6 +2095,9 @@ static void ixgbe_update_itr(struct ixgbe_q_vector *q_vector,
 	 */
 	/* what was last interrupt timeslice? */
 	timepassed_us = q_vector->itr >> 2;
+	if (timepassed_us == 0)
+		return;
+
 	bytes_perint = bytes / timepassed_us; /* bytes/usec */
 
 	switch (itr_setting) {
@@ -2451,6 +2454,16 @@ static irqreturn_t ixgbe_msix_other(int irq, void *data)
 	 * with the write to EICR.
 	 */
 	eicr = IXGBE_READ_REG(hw, IXGBE_EICS);
+
+	/* The lower 16bits of the EICR register are for the queue interrupts
+	 * which should be masked here in order to not accidently clear them if
+	 * the bits are high when ixgbe_msix_other is called. There is a race
+	 * condition otherwise which results in possible performance loss
+	 * especially if the ixgbe_msix_other interrupt is triggering
+	 * consistently (as it would when PPS is turned on for the X540 device)
+	 */
+	eicr &= 0xFFFF0000;
+
 	IXGBE_WRITE_REG(hw, IXGBE_EICR, eicr);
 
 	if (eicr & IXGBE_EICR_LSC)
@@ -7205,10 +7218,19 @@ int ixgbe_wol_supported(struct ixgbe_adapter *adapter, u16 device_id,
 			/* only support first port */
 			if (hw->bus.func != 0)
 				break;
+		case IXGBE_SUBDEV_ID_82599_SP_560FLR:
 		case IXGBE_SUBDEV_ID_82599_SFP:
 		case IXGBE_SUBDEV_ID_82599_RNDC:
 		case IXGBE_SUBDEV_ID_82599_ECNA_DP:
 		case IXGBE_SUBDEV_ID_82599_LOM_SFP:
+			is_wol_supported = 1;
+			break;
+		}
+		break;
+	case IXGBE_DEV_ID_82599EN_SFP:
+		/* Only this subdevice supports WOL */
+		switch (subdevice_id) {
+		case IXGBE_SUBDEV_ID_82599EN_SFP_OCP1:
 			is_wol_supported = 1;
 			break;
 		}
@@ -7529,9 +7551,9 @@ skip_sriov:
 	/* WOL not supported for all devices */
 	adapter->wol = 0;
 	hw->eeprom.ops.read(hw, 0x2c, &adapter->eeprom_cap);
-	hw->wol_supported = ixgbe_wol_supported(adapter, pdev->device,
+	hw->wol_enabled = ixgbe_wol_supported(adapter, pdev->device,
 						pdev->subsystem_device);
-	if (hw->wol_supported)
+	if (hw->wol_enabled)
 		adapter->wol = IXGBE_WUFC_MAG;
 
 	device_set_wakeup_enable(&adapter->pdev->dev, adapter->wol);

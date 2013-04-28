@@ -916,6 +916,7 @@ void pci_disable_rom(struct pci_dev *pdev);
 void __iomem __must_check *pci_map_rom(struct pci_dev *pdev, size_t *size);
 void pci_unmap_rom(struct pci_dev *pdev, void __iomem *rom);
 size_t pci_get_rom_size(struct pci_dev *pdev, void __iomem *rom, size_t size);
+void __iomem __must_check *pci_platform_rom(struct pci_dev *pdev, size_t *size);
 
 /* Power management related routines */
 int pci_save_state(struct pci_dev *dev);
@@ -1643,6 +1644,7 @@ extern int pci_enable_sriov(struct pci_dev *dev, int nr_virtfn);
 extern void pci_disable_sriov(struct pci_dev *dev);
 extern irqreturn_t pci_sriov_migration(struct pci_dev *dev);
 extern int pci_num_vf(struct pci_dev *dev);
+int pci_vfs_assigned(struct pci_dev *dev);
 extern int pci_sriov_set_totalvfs(struct pci_dev *dev, u16 numvfs);
 extern int pci_sriov_get_totalvfs(struct pci_dev *dev);
 #else
@@ -1658,6 +1660,10 @@ static inline irqreturn_t pci_sriov_migration(struct pci_dev *dev)
 	return IRQ_NONE;
 }
 static inline int pci_num_vf(struct pci_dev *dev)
+{
+	return 0;
+}
+static inline int pci_vfs_assigned(struct pci_dev *dev)
 {
 	return 0;
 }

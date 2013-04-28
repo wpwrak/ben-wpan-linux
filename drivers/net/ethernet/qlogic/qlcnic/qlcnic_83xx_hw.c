@@ -1619,6 +1619,12 @@ int qlcnic_83xx_loopback_test(struct net_device *netdev, u8 mode)
 		}
 	} while ((adapter->ahw->linkup && ahw->has_link_events) != 1);
 
+	/* Make sure carrier is off and queue is stopped during loopback */
+	if (netif_running(netdev)) {
+		netif_carrier_off(netdev);
+		netif_stop_queue(netdev);
+	}
+
 	ret = qlcnic_do_lb_test(adapter, mode);
 
 	qlcnic_83xx_clear_lb_mode(adapter, mode);
@@ -1931,7 +1937,7 @@ int qlcnic_83xx_get_mac_address(struct qlcnic_adapter *adapter, u8 *mac)
 void qlcnic_83xx_config_intr_coal(struct qlcnic_adapter *adapter)
 {
 	int err;
-	u32 temp;
+	u16 temp;
 	struct qlcnic_cmd_args cmd;
 	struct qlcnic_nic_intr_coalesce *coal = &adapter->ahw->coal;
 
@@ -1939,10 +1945,18 @@ void qlcnic_83xx_config_intr_coal(struct qlcnic_adapter *adapter)
 		return;
 
 	qlcnic_alloc_mbx_args(&cmd, adapter, QLCNIC_CMD_CONFIG_INTR_COAL);
-	cmd.req.arg[1] = 1 | (adapter->recv_ctx->context_id << 16);
+	if (coal->type == QLCNIC_INTR_COAL_TYPE_RX) {
+		temp = adapter->recv_ctx->context_id;
+		cmd.req.arg[1] = QLCNIC_INTR_COAL_TYPE_RX | temp << 16;
+		temp = coal->rx_time_us;
+		cmd.req.arg[2] = coal->rx_packets | temp << 16;
+	} else if (coal->type == QLCNIC_INTR_COAL_TYPE_TX) {
+		temp = adapter->tx_ring->ctx_id;
+		cmd.req.arg[1] = QLCNIC_INTR_COAL_TYPE_TX | temp << 16;
+		temp = coal->tx_time_us;
+		cmd.req.arg[2] = coal->tx_packets | temp << 16;
+	}
 	cmd.req.arg[3] = coal->flag;
-	temp = coal->rx_time_us << 16;
-	cmd.req.arg[2] = coal->rx_packets | temp;
 	err = qlcnic_issue_cmd(adapter, &cmd);
 	if (err != QLCNIC_RCODE_SUCCESS)
 		dev_info(&adapter->pdev->dev,
@@ -2916,6 +2930,9 @@ static u64 *qlcnic_83xx_fill_stats(struct qlcnic_adapter *adapter,
 		/* fill in MAC rx frame stats */
 		for (k += 6; k < 80; k += 2)
 			data = qlcnic_83xx_copy_stats(cmd, data, k);
+		/* fill in eSwitch stats */
+		for (; k < total_regs; k += 2)
+			data = qlcnic_83xx_copy_stats(cmd, data, k);
 		break;
 	case QLC_83XX_STAT_RX:
 		for (k = 2; k < 8; k += 2)
@@ -2944,6 +2961,7 @@ static u64 *qlcnic_83xx_fill_stats(struct qlcnic_adapter *adapter,
 void qlcnic_83xx_get_stats(struct qlcnic_adapter *adapter, u64 *data)
 {
 	struct qlcnic_cmd_args cmd;
+	struct net_device *netdev = adapter->netdev;
 	int ret = 0;
 
 	qlcnic_alloc_mbx_args(&cmd, adapter, QLCNIC_CMD_GET_STATISTICS);
@@ -2953,7 +2971,7 @@ void qlcnic_83xx_get_stats(struct qlcnic_adapter *adapter, u64 *data)
 	data = qlcnic_83xx_fill_stats(adapter, &cmd, data,
 				      QLC_83XX_STAT_TX, &ret);
 	if (ret) {
-		dev_info(&adapter->pdev->dev, "Error getting MAC stats\n");
+		netdev_err(netdev, "Error getting Tx stats\n");
 		goto out;
 	}
 	/* Get MAC stats */
@@ -2963,8 +2981,7 @@ void qlcnic_83xx_get_stats(struct qlcnic_adapter *adapter, u64 *data)
 	data = qlcnic_83xx_fill_stats(adapter, &cmd, data,
 				      QLC_83XX_STAT_MAC, &ret);
 	if (ret) {
-		dev_info(&adapter->pdev->dev,
-			 "Error getting Rx stats\n");
+		netdev_err(netdev, "Error getting MAC stats\n");
 		goto out;
 	}
 	/* Get Rx stats */
@@ -2974,8 +2991,7 @@ void qlcnic_83xx_get_stats(struct qlcnic_adapter *adapter, u64 *data)
 	data = qlcnic_83xx_fill_stats(adapter, &cmd, data,
 				      QLC_83XX_STAT_RX, &ret);
 	if (ret)
-		dev_info(&adapter->pdev->dev,
-			 "Error getting Tx stats\n");
+		netdev_err(netdev, "Error getting Rx stats\n");
 out:
 	qlcnic_free_mbx_args(&cmd);
 }

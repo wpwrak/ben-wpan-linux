@@ -339,6 +339,59 @@ static int __packet_get_status(struct packet_sock *po, void *frame)
 	}
 }
 
+static __u32 tpacket_get_timestamp(struct sk_buff *skb, struct timespec *ts,
+				   unsigned int flags)
+{
+	struct skb_shared_hwtstamps *shhwtstamps = skb_hwtstamps(skb);
+
+	if (shhwtstamps) {
+		if ((flags & SOF_TIMESTAMPING_SYS_HARDWARE) &&
+		    ktime_to_timespec_cond(shhwtstamps->syststamp, ts))
+			return TP_STATUS_TS_SYS_HARDWARE;
+		if ((flags & SOF_TIMESTAMPING_RAW_HARDWARE) &&
+		    ktime_to_timespec_cond(shhwtstamps->hwtstamp, ts))
+			return TP_STATUS_TS_RAW_HARDWARE;
+	}
+
+	if (ktime_to_timespec_cond(skb->tstamp, ts))
+		return TP_STATUS_TS_SOFTWARE;
+
+	return 0;
+}
+
+static __u32 __packet_set_timestamp(struct packet_sock *po, void *frame,
+				    struct sk_buff *skb)
+{
+	union tpacket_uhdr h;
+	struct timespec ts;
+	__u32 ts_status;
+
+	if (!(ts_status = tpacket_get_timestamp(skb, &ts, po->tp_tstamp)))
+		return 0;
+
+	h.raw = frame;
+	switch (po->tp_version) {
+	case TPACKET_V1:
+		h.h1->tp_sec = ts.tv_sec;
+		h.h1->tp_usec = ts.tv_nsec / NSEC_PER_USEC;
+		break;
+	case TPACKET_V2:
+		h.h2->tp_sec = ts.tv_sec;
+		h.h2->tp_nsec = ts.tv_nsec;
+		break;
+	case TPACKET_V3:
+	default:
+		WARN(1, "TPACKET version not supported.\n");
+		BUG();
+	}
+
+	/* one flush is safe, as both fields always lie on the same cacheline */
+	flush_dcache_page(pgv_to_page(&h.h1->tp_sec));
+	smp_wmb();
+
+	return ts_status;
+}
+
 static void *packet_lookup_frame(struct packet_sock *po,
 		struct packet_ring_buffer *rb,
 		unsigned int position,
@@ -475,7 +528,7 @@ static void init_prb_bdqc(struct packet_sock *po,
 	p1->hdrlen = po->tp_hdrlen;
 	p1->version = po->tp_version;
 	p1->last_kactive_blk_num = 0;
-	po->stats_u.stats3.tp_freeze_q_cnt = 0;
+	po->stats.stats3.tp_freeze_q_cnt = 0;
 	if (req_u->req3.tp_retire_blk_tov)
 		p1->retire_blk_tov = req_u->req3.tp_retire_blk_tov;
 	else
@@ -643,7 +696,7 @@ static void prb_close_block(struct tpacket_kbdq_core *pkc1,
 	struct tpacket3_hdr *last_pkt;
 	struct tpacket_hdr_v1 *h1 = &pbd1->hdr.bh1;
 
-	if (po->stats.tp_drops)
+	if (po->stats.stats3.tp_drops)
 		status |= TP_STATUS_LOSING;
 
 	last_pkt = (struct tpacket3_hdr *)pkc1->prev;
@@ -748,7 +801,7 @@ static void prb_freeze_queue(struct tpacket_kbdq_core *pkc,
 				  struct packet_sock *po)
 {
 	pkc->reset_pending_on_curr_blk = 1;
-	po->stats_u.stats3.tp_freeze_q_cnt++;
+	po->stats.stats3.tp_freeze_q_cnt++;
 }
 
 #define TOTAL_PKT_LEN_INCL_ALIGN(length) (ALIGN((length), V3_ALIGNMENT))
@@ -1634,7 +1687,7 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,
 	nf_reset(skb);
 
 	spin_lock(&sk->sk_receive_queue.lock);
-	po->stats.tp_packets++;
+	po->stats.stats1.tp_packets++;
 	skb->dropcount = atomic_read(&sk->sk_drops);
 	__skb_queue_tail(&sk->sk_receive_queue, skb);
 	spin_unlock(&sk->sk_receive_queue.lock);
@@ -1643,7 +1696,7 @@ static int packet_rcv(struct sk_buff *skb, struct net_device *dev,
 
 drop_n_acct:
 	spin_lock(&sk->sk_receive_queue.lock);
-	po->stats.tp_drops++;
+	po->stats.stats1.tp_drops++;
 	atomic_inc(&sk->sk_drops);
 	spin_unlock(&sk->sk_receive_queue.lock);
 
@@ -1655,26 +1708,6 @@ drop_n_restore:
 drop:
 	consume_skb(skb);
 	return 0;
-}
-
-static void tpacket_get_timestamp(struct sk_buff *skb, struct timespec *ts,
-				  unsigned int flags)
-{
-	struct skb_shared_hwtstamps *shhwtstamps = skb_hwtstamps(skb);
-
-	if (shhwtstamps) {
-		if ((flags & SOF_TIMESTAMPING_SYS_HARDWARE) &&
-		    ktime_to_timespec_cond(shhwtstamps->syststamp, ts))
-			return;
-		if ((flags & SOF_TIMESTAMPING_RAW_HARDWARE) &&
-		    ktime_to_timespec_cond(shhwtstamps->hwtstamp, ts))
-			return;
-	}
-
-	if (ktime_to_timespec_cond(skb->tstamp, ts))
-		return;
-
-	getnstimeofday(ts);
 }
 
 static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
@@ -1691,6 +1724,7 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 	unsigned short macoff, netoff, hdrlen;
 	struct sk_buff *copy_skb = NULL;
 	struct timespec ts;
+	__u32 ts_status;
 
 	if (skb->pkt_type == PACKET_LOOPBACK)
 		goto drop;
@@ -1762,10 +1796,10 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 	 * Anyways, moving it for V1/V2 only as V3 doesn't need this
 	 * at packet level.
 	 */
-		if (po->stats.tp_drops)
+		if (po->stats.stats1.tp_drops)
 			status |= TP_STATUS_LOSING;
 	}
-	po->stats.tp_packets++;
+	po->stats.stats1.tp_packets++;
 	if (copy_skb) {
 		status |= TP_STATUS_COPY;
 		__skb_queue_tail(&sk->sk_receive_queue, copy_skb);
@@ -1773,7 +1807,11 @@ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev,
 	spin_unlock(&sk->sk_receive_queue.lock);
 
 	skb_copy_bits(skb, 0, h.raw + macoff, snaplen);
-	tpacket_get_timestamp(skb, &ts, po->tp_tstamp);
+
+	if (!(ts_status = tpacket_get_timestamp(skb, &ts, po->tp_tstamp)))
+		getnstimeofday(&ts);
+
+	status |= ts_status;
 
 	switch (po->tp_version) {
 	case TPACKET_V1:
@@ -1860,7 +1898,7 @@ drop:
 	return 0;
 
 ring_is_full:
-	po->stats.tp_drops++;
+	po->stats.stats1.tp_drops++;
 	spin_unlock(&sk->sk_receive_queue.lock);
 
 	sk->sk_data_ready(sk, 0);
@@ -1874,10 +1912,14 @@ static void tpacket_destruct_skb(struct sk_buff *skb)
 	void *ph;
 
 	if (likely(po->tx_ring.pg_vec)) {
+		__u32 ts;
+
 		ph = skb_shinfo(skb)->destructor_arg;
 		BUG_ON(atomic_read(&po->tx_ring.pending) == 0);
 		atomic_dec(&po->tx_ring.pending);
-		__packet_set_status(po, ph, TP_STATUS_AVAILABLE);
+
+		ts = __packet_set_timestamp(po, ph, skb);
+		__packet_set_status(po, ph, TP_STATUS_AVAILABLE | ts);
 	}
 
 	sock_wfree(skb);
@@ -1900,6 +1942,7 @@ static int tpacket_fill_skb(struct packet_sock *po, struct sk_buff *skb,
 	skb->dev = dev;
 	skb->priority = po->sk.sk_priority;
 	skb->mark = po->sk.sk_mark;
+	sock_tx_timestamp(&po->sk, &skb_shinfo(skb)->tx_flags);
 	skb_shinfo(skb)->destructor_arg = ph.raw;
 
 	switch (po->tp_version) {
@@ -3204,8 +3247,7 @@ static int packet_getsockopt(struct socket *sock, int level, int optname,
 	struct sock *sk = sock->sk;
 	struct packet_sock *po = pkt_sk(sk);
 	void *data = &val;
-	struct tpacket_stats st;
-	union tpacket_stats_u st_u;
+	union tpacket_stats_u st;
 
 	if (level != SOL_PACKET)
 		return -ENOPROTOOPT;
@@ -3219,22 +3261,18 @@ static int packet_getsockopt(struct socket *sock, int level, int optname,
 	switch (optname) {
 	case PACKET_STATISTICS:
 		spin_lock_bh(&sk->sk_receive_queue.lock);
+		memcpy(&st, &po->stats, sizeof(st));
+		memset(&po->stats, 0, sizeof(po->stats));
+		spin_unlock_bh(&sk->sk_receive_queue.lock);
+
 		if (po->tp_version == TPACKET_V3) {
 			lv = sizeof(struct tpacket_stats_v3);
-			memcpy(&st_u.stats3, &po->stats,
-			       sizeof(struct tpacket_stats));
-			st_u.stats3.tp_freeze_q_cnt =
-					po->stats_u.stats3.tp_freeze_q_cnt;
-			st_u.stats3.tp_packets += po->stats.tp_drops;
-			data = &st_u.stats3;
+			data = &st.stats3;
 		} else {
 			lv = sizeof(struct tpacket_stats);
-			st = po->stats;
-			st.tp_packets += st.tp_drops;
-			data = &st;
+			data = &st.stats1;
 		}
-		memset(&po->stats, 0, sizeof(st));
-		spin_unlock_bh(&sk->sk_receive_queue.lock);
+
 		break;
 	case PACKET_AUXDATA:
 		val = po->auxdata;

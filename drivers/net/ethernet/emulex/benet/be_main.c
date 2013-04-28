@@ -353,9 +353,9 @@ static void populate_be_v0_stats(struct be_adapter *adapter)
 	drvs->rx_input_fifo_overflow_drop = port_stats->rx_input_fifo_overflow;
 	drvs->rx_dropped_header_too_small =
 		port_stats->rx_dropped_header_too_small;
-	drvs->rx_address_mismatch_drops =
-					port_stats->rx_address_mismatch_drops +
-					port_stats->rx_vlan_mismatch_drops;
+	drvs->rx_address_filtered =
+					port_stats->rx_address_filtered +
+					port_stats->rx_vlan_filtered;
 	drvs->rx_alignment_symbol_errors =
 		port_stats->rx_alignment_symbol_errors;
 
@@ -404,7 +404,7 @@ static void populate_be_v1_stats(struct be_adapter *adapter)
 		port_stats->rx_dropped_header_too_small;
 	drvs->rx_input_fifo_overflow_drop =
 		port_stats->rx_input_fifo_overflow_drop;
-	drvs->rx_address_mismatch_drops = port_stats->rx_address_mismatch_drops;
+	drvs->rx_address_filtered = port_stats->rx_address_filtered;
 	drvs->rx_alignment_symbol_errors =
 		port_stats->rx_alignment_symbol_errors;
 	drvs->rxpp_fifo_overflow_drop = port_stats->rxpp_fifo_overflow_drop;
@@ -445,9 +445,9 @@ static void populate_lancer_stats(struct be_adapter *adapter)
 	drvs->rx_dropped_header_too_small =
 				pport_stats->rx_dropped_header_too_small;
 	drvs->rx_input_fifo_overflow_drop = pport_stats->rx_fifo_overflow;
-	drvs->rx_address_mismatch_drops =
-					pport_stats->rx_address_mismatch_drops +
-					pport_stats->rx_vlan_mismatch_drops;
+	drvs->rx_address_filtered =
+					pport_stats->rx_address_filtered +
+					pport_stats->rx_vlan_filtered;
 	drvs->rx_alignment_symbol_errors = pport_stats->rx_symbol_errors_lo;
 	drvs->rxpp_fifo_overflow_drop = pport_stats->rx_fifo_overflow;
 	drvs->tx_pauseframes = pport_stats->tx_pause_frames_lo;
@@ -772,8 +772,9 @@ static struct sk_buff *be_insert_vlan_in_pkt(struct be_adapter *adapter,
 
 	if (vlan_tx_tag_present(skb)) {
 		vlan_tag = be_get_tx_vlan_tag(adapter, skb);
-		__vlan_put_tag(skb, htons(ETH_P_8021Q), vlan_tag);
-		skb->vlan_tci = 0;
+		skb = __vlan_put_tag(skb, htons(ETH_P_8021Q), vlan_tag);
+		if (skb)
+			skb->vlan_tci = 0;
 	}
 
 	return skb;
@@ -2509,9 +2510,19 @@ static int be_rx_qs_create(struct be_adapter *adapter)
 				rsstable[j + i] = rxo->rss_id;
 			}
 		}
-		rc = be_cmd_rss_config(adapter, rsstable, 128);
-		if (rc)
+		adapter->rss_flags = RSS_ENABLE_TCP_IPV4 | RSS_ENABLE_IPV4 |
+					RSS_ENABLE_TCP_IPV6 | RSS_ENABLE_IPV6;
+
+		if (!BEx_chip(adapter))
+			adapter->rss_flags |= RSS_ENABLE_UDP_IPV4 |
+						RSS_ENABLE_UDP_IPV6;
+
+		rc = be_cmd_rss_config(adapter, rsstable, adapter->rss_flags,
+				       128);
+		if (rc) {
+			adapter->rss_flags = 0;
 			return rc;
+		}
 	}
 
 	/* First time posting */

@@ -54,6 +54,7 @@ struct pgv {
 
 struct packet_ring_buffer {
 	struct pgv		*pg_vec;
+
 	unsigned int		head;
 	unsigned int		frames_per_block;
 	unsigned int		frame_size;
@@ -63,8 +64,9 @@ struct packet_ring_buffer {
 	unsigned int		pg_vec_pages;
 	unsigned int		pg_vec_len;
 
-	struct tpacket_kbdq_core	prb_bdqc;
 	atomic_t		pending;
+
+	struct tpacket_kbdq_core	prb_bdqc;
 };
 
 extern struct mutex fanout_mutex;
@@ -91,8 +93,7 @@ struct packet_sock {
 	/* struct sock has to be the first member of packet_sock */
 	struct sock		sk;
 	struct packet_fanout	*fanout;
-	struct tpacket_stats	stats;
-	union  tpacket_stats_u	stats_u;
+	union  tpacket_stats_u	stats;
 	struct packet_ring_buffer	rx_ring;
 	struct packet_ring_buffer	tx_ring;
 	int			copy_thresh;

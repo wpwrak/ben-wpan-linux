@@ -725,7 +725,8 @@ static int ehea_proc_rwqes(struct net_device *dev,
 			processed_bytes += skb->len;
 
 			if (cqe->status & EHEA_CQE_VLAN_TAG_XTRACT)
-				__vlan_hwaccel_put_tag(skb, cqe->vlan_tag);
+				__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021Q),
+						       cqe->vlan_tag);
 
 			napi_gro_receive(&pr->napi, skb);
 		} else {
@@ -3020,12 +3021,12 @@ static struct ehea_port *ehea_setup_single_port(struct ehea_adapter *adapter,
 	dev->netdev_ops = &ehea_netdev_ops;
 	ehea_set_ethtool_ops(dev);
 
-	dev->hw_features = NETIF_F_SG | NETIF_F_TSO
-		      | NETIF_F_IP_CSUM | NETIF_F_HW_VLAN_CTAG_TX;
-	dev->features = NETIF_F_SG | NETIF_F_FRAGLIST | NETIF_F_TSO
-		      | NETIF_F_HIGHDMA | NETIF_F_IP_CSUM |
-		      | NETIF_F_HW_VLAN_CTAG_TX | NETIF_F_HW_VLAN_CTAG_RX |
-		      | NETIF_F_HW_VLAN_CTAG_FILTER | NETIF_F_RXCSUM;
+	dev->hw_features = NETIF_F_SG | NETIF_F_TSO |
+		      NETIF_F_IP_CSUM | NETIF_F_HW_VLAN_CTAG_TX;
+	dev->features = NETIF_F_SG | NETIF_F_FRAGLIST | NETIF_F_TSO |
+		      NETIF_F_HIGHDMA | NETIF_F_IP_CSUM |
+		      NETIF_F_HW_VLAN_CTAG_TX | NETIF_F_HW_VLAN_CTAG_RX |
+		      NETIF_F_HW_VLAN_CTAG_FILTER | NETIF_F_RXCSUM;
 	dev->vlan_features = NETIF_F_SG | NETIF_F_TSO | NETIF_F_HIGHDMA |
 			NETIF_F_IP_CSUM;
 	dev->watchdog_timeo = EHEA_WATCH_DOG_TIMEOUT;

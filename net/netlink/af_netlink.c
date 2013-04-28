@@ -381,7 +381,7 @@ static void netlink_frame_flush_dcache(const struct nl_mmap_hdr *hdr)
 
 	/* First page is flushed through netlink_{get,set}_status */
 	p_start = pgvec_to_page(hdr + PAGE_SIZE);
-	p_end   = pgvec_to_page((void *)hdr + NL_MMAP_MSG_HDRLEN + hdr->nm_len - 1);
+	p_end   = pgvec_to_page((void *)hdr + NL_MMAP_HDRLEN + hdr->nm_len - 1);
 	while (p_start <= p_end) {
 		flush_dcache_page(p_start);
 		p_start++;
@@ -660,8 +660,8 @@ static void netlink_queue_mmaped_skb(struct sock *sk, struct sk_buff *skb)
 	hdr->nm_len	= skb->len;
 	hdr->nm_group	= NETLINK_CB(skb).dst_group;
 	hdr->nm_pid	= NETLINK_CB(skb).creds.pid;
-	hdr->nm_uid	= NETLINK_CB(skb).creds.uid;
-	hdr->nm_gid	= NETLINK_CB(skb).creds.gid;
+	hdr->nm_uid	= from_kuid(sk_user_ns(sk), NETLINK_CB(skb).creds.uid);
+	hdr->nm_gid	= from_kgid(sk_user_ns(sk), NETLINK_CB(skb).creds.gid);
 	netlink_frame_flush_dcache(hdr);
 	netlink_set_status(hdr, NL_MMAP_STATUS_VALID);
 
@@ -690,8 +690,8 @@ static void netlink_ring_set_copied(struct sock *sk, struct sk_buff *skb)
 	hdr->nm_len	= skb->len;
 	hdr->nm_group	= NETLINK_CB(skb).dst_group;
 	hdr->nm_pid	= NETLINK_CB(skb).creds.pid;
-	hdr->nm_uid	= NETLINK_CB(skb).creds.uid;
-	hdr->nm_gid	= NETLINK_CB(skb).creds.gid;
+	hdr->nm_uid	= from_kuid(sk_user_ns(sk), NETLINK_CB(skb).creds.uid);
+	hdr->nm_gid	= from_kgid(sk_user_ns(sk), NETLINK_CB(skb).creds.gid);
 	netlink_set_status(hdr, NL_MMAP_STATUS_COPY);
 }
 

@@ -642,6 +642,14 @@ static void bnx2x_gro_ipv6_csum(struct bnx2x *bp, struct sk_buff *skb)
 	th->check = ~tcp_v6_check(skb->len - skb_transport_offset(skb),
 				  &iph->saddr, &iph->daddr, 0);
 }
+
+static void bnx2x_gro_csum(struct bnx2x *bp, struct sk_buff *skb,
+			    void (*gro_func)(struct bnx2x*, struct sk_buff*))
+{
+	skb_set_network_header(skb, 0);
+	gro_func(bp, skb);
+	tcp_gro_complete(skb);
+}
 #endif
 
 static void bnx2x_gro_receive(struct bnx2x *bp, struct bnx2x_fastpath *fp,
@@ -649,19 +657,17 @@ static void bnx2x_gro_receive(struct bnx2x *bp, struct bnx2x_fastpath *fp,
 {
 #ifdef CONFIG_INET
 	if (skb_shinfo(skb)->gso_size) {
-		skb_set_network_header(skb, 0);
 		switch (be16_to_cpu(skb->protocol)) {
 		case ETH_P_IP:
-			bnx2x_gro_ip_csum(bp, skb);
+			bnx2x_gro_csum(bp, skb, bnx2x_gro_ip_csum);
 			break;
 		case ETH_P_IPV6:
-			bnx2x_gro_ipv6_csum(bp, skb);
+			bnx2x_gro_csum(bp, skb, bnx2x_gro_ipv6_csum);
 			break;
 		default:
-			BNX2X_ERR("FW GRO supports only IPv4/IPv6, not 0x%04x\n",
+			BNX2X_ERR("Error: FW GRO supports only IPv4/IPv6, not 0x%04x\n",
 				  be16_to_cpu(skb->protocol));
 		}
-		tcp_gro_complete(skb);
 	}
 #endif
 	napi_gro_receive(&fp->napi, skb);
@@ -2615,6 +2621,9 @@ int bnx2x_nic_load(struct bnx2x *bp, int load_mode)
 			}
 		}
 
+		/* initialize FW coalescing state machines in RAM */
+		bnx2x_update_coalesce(bp);
+
 		/* setup the leading queue */
 		rc = bnx2x_setup_leading(bp);
 		if (rc) {
@@ -2655,7 +2664,8 @@ int bnx2x_nic_load(struct bnx2x *bp, int load_mode)
 	if (IS_PF(bp))
 		rc = bnx2x_set_eth_mac(bp, true);
 	else /* vf */
-		rc = bnx2x_vfpf_set_mac(bp);
+		rc = bnx2x_vfpf_config_mac(bp, bp->dev->dev_addr, bp->fp->index,
+					   true);
 	if (rc) {
 		BNX2X_ERR("Setting Ethernet MAC failed\n");
 		LOAD_ERROR_EXIT(bp, load_error3);
@@ -2924,9 +2934,9 @@ int bnx2x_nic_unload(struct bnx2x *bp, int unload_mode, bool keep_link)
 		bnx2x_free_fp_mem_cnic(bp);
 
 	if (IS_PF(bp)) {
-		bnx2x_free_mem(bp);
 		if (CNIC_LOADED(bp))
 			bnx2x_free_mem_cnic(bp);
+		bnx2x_free_mem(bp);
 	}
 	bp->state = BNX2X_STATE_CLOSED;
 	bp->cnic_loaded = false;
@@ -4737,11 +4747,11 @@ static void storm_memset_hc_disable(struct bnx2x *bp, u8 port,
 	u32 enable_flag = disable ? 0 : (1 << HC_INDEX_DATA_HC_ENABLED_SHIFT);
 	u32 addr = BAR_CSTRORM_INTMEM +
 		   CSTORM_STATUS_BLOCK_DATA_FLAGS_OFFSET(fw_sb_id, sb_index);
-	u16 flags = REG_RD16(bp, addr);
+	u8 flags = REG_RD8(bp, addr);
 	/* clear and set */
 	flags &= ~HC_INDEX_DATA_HC_ENABLED;
 	flags |= enable_flag;
-	REG_WR16(bp, addr, flags);
+	REG_WR8(bp, addr, flags);
 	DP(NETIF_MSG_IFUP,
 	   "port %x fw_sb_id %d sb_index %d disable %d\n",
 	   port, fw_sb_id, sb_index, disable);
