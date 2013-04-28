@@ -48,6 +48,9 @@ struct spi_jz4740_gpio {
 #define	PxDATC	(prv->port_base+0x18)
 #define	PxFUNC	(prv->port_base+0x48)
 
+#define	PIN_TO_PORT(pin)	((pin) >> 5)
+#define	PIN_TO_MASK(pin)	(1 << ((pin) & 31))
+
 
 /* ----- SPI transfers ----------------------------------------------------- */
 
@@ -242,7 +245,7 @@ static int get_gpio(struct spi_jz4740_gpio *prv,
 	if (!prv)
 		return 0;
 
-	port = JZ4740_GPIO_BASE_ADDR + 0x100 * (pin >> 5);
+	port = JZ4740_GPIO_BASE_ADDR + 0x100 * PIN_TO_PORT(pin);
 	if (prv->port_addr && prv->port_addr != port) {
 		err = -EINVAL;
 		goto fail;
@@ -301,7 +304,7 @@ static int setup_gpios(struct spi_jz4740_gpio *prv, const char *label,
 		err = get_gpio(prv, pdata->mosi, label, 0);
 		if (err)
 			return err;
-		prv->mosi = 1 << (pdata->mosi & 31);
+		prv->mosi = PIN_TO_MASK(pdata->mosi);
 	}
 
 	if (pdata->miso == -1) {
@@ -310,13 +313,13 @@ static int setup_gpios(struct spi_jz4740_gpio *prv, const char *label,
 		err = get_gpio(prv, pdata->miso, label, -1);
 		if (err)
 			goto fail;
-		prv->miso = 1 << (pdata->miso & 31);
+		prv->miso = PIN_TO_MASK(pdata->miso);
 	}
 
 	err = get_gpio(prv, pdata->sck, label, 0);
 	if (err)
 		goto fail;
-	prv->sck = 1 << (pdata->sck & 31);
+	prv->sck = PIN_TO_MASK(pdata->sck);
 
 	return 0;
 
