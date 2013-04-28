@@ -36,7 +36,7 @@ config IEEE802154_AT86RF230
         depends on SPI
 
 config IEEE802154_ATBEN
-	tristate "ATBEN 8:10 SPI-GPIO driver"
+	boolean "ATBEN 8:10 SPI-GPIO framework"
 	depends on IEEE802154_AT86RF230 && SPI && JZ4740_QI_LB60
 	---help---
 	  "Glue" driver for the ATBEN IEEE 802.15.4 board in a Ben NanoNote.
