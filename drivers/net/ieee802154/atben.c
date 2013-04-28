@@ -44,12 +44,17 @@ static void atben_reset(void *dummy)
 	const int charge = 1 << nSEL | 1 << MOSI | 1 << SLP_TR | 1 << SCLK;
 	const int discharge = charge | 1 << IRQ | 1 << MISO;
 
-#ifndef CONFIG_SPI_JZ4740_GPIO
+	/*
+	 * Note: we need the next 6 lines only if using spi-gpio.
+	 * Both jz4740_mmc and spi-jz4740-gpio take care of the function
+	 * setting and neither need nor are bothered by having the pins
+	 * configured here.
+	 */
+
 	jz_gpio_set_function(JZ_GPIO_PORTD(MOSI), JZ_GPIO_FUNC_NONE);
 	jz_gpio_set_function(JZ_GPIO_PORTD(MISO), JZ_GPIO_FUNC_NONE);
 	jz_gpio_set_function(JZ_GPIO_PORTD(SCLK), JZ_GPIO_FUNC_NONE);
 	jz_gpio_set_function(JZ_GPIO_PORTD(nSEL), JZ_GPIO_FUNC_NONE);
-#endif
 	jz_gpio_set_function(JZ_GPIO_PORTD(SLP_TR), JZ_GPIO_FUNC_NONE);
 	jz_gpio_set_function(JZ_GPIO_PORTD(IRQ), JZ_GPIO_FUNC_NONE);
 
