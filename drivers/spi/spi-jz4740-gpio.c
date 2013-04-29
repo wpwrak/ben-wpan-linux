@@ -10,16 +10,19 @@
  */
 
 /*
- * This is a drop-in replacement for spi-gpio.c, optimized for Jz4740-based
- * systems. It is about six times faster than its generic counterpart.
+ * This is a drop-in replacement for spi-gpio.c optimized for Jz4740-based
+ * systems. It is up to about six times faster than its generic counterpart.
  *
- * There are only two usage differences:
+ * There are three restrictions and usage differences:
  *
- * 1) struct platform_device.name must be "spi_jz4740_gpio" instead of
- *    "spi_gpio", and
+ * 1) No other configurations than SPI mode 0 and CS active-low are
+ *    supported.
  *
  * 2) MOSI, MISO, and SCK must be on the same port. Driver probing fails
  *    if they are not.
+ *
+ * 3) struct platform_device.name must be "spi_jz4740_gpio" instead of
+ *    "spi_gpio".
  */
 
 
@@ -350,7 +353,7 @@ static int spi_jz4740_gpio_probe(struct platform_device *pdev)
 	if (err)
 		goto out_master;
 
-	master->mode_bits	= SPI_CPOL | SPI_CPHA | SPI_CS_HIGH;
+	master->mode_bits	= 0;	/* SPI_MODE_0 only */
 	master->bus_num		= pdev->id;
 	master->num_chipselect	= pdata->num_chipselect;
 	master->setup		= spi_jz4740_gpio_setup;
