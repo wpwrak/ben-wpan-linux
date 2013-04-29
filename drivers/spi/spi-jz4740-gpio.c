@@ -193,6 +193,7 @@ static int spi_jz4740_gpio_transfer_one(struct spi_master *master,
 	}
 
 	msg->actual_length = 0;
+	msg->status = 0;
 
 	gpio_set_value(nsel, 0);
 	list_for_each_entry(xfer, &msg->transfers, transfer_list) {
@@ -209,7 +210,6 @@ static int spi_jz4740_gpio_transfer_one(struct spi_master *master,
 	}
 	gpio_set_value(nsel, 1);
 
-	msg->status = 0;
 out:
 	spi_finalize_current_message(master);
 
@@ -364,8 +364,8 @@ static int spi_jz4740_gpio_probe(struct platform_device *pdev)
 
 	/*
 	 * We don't [devm_]request_mem_region here since we don't need
-	 * exclusive access to port registers. Pin access conflicts are
-	 * resolved through gpiolib.
+	 * exclusive access to port registers. Pin access conflicts have
+	 * already been resolved by gpiolib.
 	 */
 
 	prv->port_base = devm_ioremap(&pdev->dev, prv->port_addr, 0x100);
