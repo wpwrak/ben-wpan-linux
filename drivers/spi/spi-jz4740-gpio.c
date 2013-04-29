@@ -28,6 +28,7 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/io.h>
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
 #include <linux/spi/spi.h>
@@ -41,7 +42,6 @@ struct spi_jz4740_gpio {
 	const struct spi_gpio_platform_data *pdata;
 	struct device		*dev;
 	void __iomem		*port_base;
-	struct resource		*ioarea;
 	uint32_t		mosi, miso, sck;
 	unsigned long		port_addr;
 };
@@ -350,7 +350,7 @@ static int spi_jz4740_gpio_probe(struct platform_device *pdev)
 
 	err = setup_gpios(prv, dev_name(prv->dev), &master->flags);
 	if (err)
-		goto out_master;
+		goto out;
 
 	master->mode_bits	= 0;	/* SPI_MODE_0 only */
 	master->bus_num		= pdev->id;
@@ -359,34 +359,29 @@ static int spi_jz4740_gpio_probe(struct platform_device *pdev)
 	master->cleanup		= spi_jz4740_gpio_cleanup;
 	master->transfer	= spi_jz4740_gpio_transfer;
 
-	prv->ioarea = request_mem_region(prv->port_addr, 0x100, pdev->name);
-	if (!prv->ioarea) {
-		dev_err(prv->dev, "can't request ioarea\n");
-		goto out_master;
+	if (!devm_request_mem_region(&pdev->dev, prv->port_addr, 0x100,
+			pdev->name)) {
+		dev_err(prv->dev, "can't request memory region\n");
+		goto out_busy;
 	}
 
-	prv->port_base = ioremap(prv->port_addr, 0x100);
+	prv->port_base = devm_ioremap(&pdev->dev, prv->port_addr, 0x100);
 	if (!prv->port_base) {
 		dev_err(prv->dev, "can't ioremap\n");
-		goto out_ioarea;
+		goto out_busy;
 	}
 
 	err = spi_register_master(master);
 	if (err) {
 		dev_err(prv->dev, "can't register master\n");
-		goto out_regs;
+		goto out;
 	}
 
 	return 0;
 
-out_regs:
-	iounmap(prv->port_base);
-
-out_ioarea:
-	release_resource(prv->ioarea);
-	kfree(prv->ioarea);
-
-out_master:
+out_busy:
+	err = -EBUSY;
+out:
 	platform_set_drvdata(pdev, NULL);
 	spi_master_put(master);
 
@@ -403,11 +398,6 @@ static int spi_jz4740_gpio_remove(struct platform_device *pdev)
 	spi_unregister_master(master);
 
 	free_gpios(prv);
-
-	iounmap(prv->port_base);
-
-	release_resource(prv->ioarea);
-	kfree(prv->ioarea);
 
 	platform_set_drvdata(pdev, NULL);
 	spi_master_put(master);
