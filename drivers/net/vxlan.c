@@ -1,14 +1,13 @@
 /*
  * VXLAN: Virtual eXtensible Local Area Network
  *
- * Copyright (c) 2012 Vyatta Inc.
+ * Copyright (c) 2012-2013 Vyatta Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  *
  * TODO
- *  - use IANA UDP port number (when defined)
  *  - IPv6 (not in RFC)
  */
 
@@ -65,7 +64,10 @@ struct vxlanhdr {
 	__be32 vx_vni;
 };
 
-/* UDP port for VXLAN traffic. */
+/* UDP port for VXLAN traffic.
+ * The IANA assigned port is 4789, but the Linux default is 8472
+ * for compatability with early adopters.
+ */
 static unsigned int vxlan_port __read_mostly = 8472;
 module_param_named(udp_port, vxlan_port, uint, 0444);
 MODULE_PARM_DESC(udp_port, "Destination UDP port");
@@ -108,6 +110,7 @@ struct vxlan_dev {
 	struct net_device *dev;
 	struct vxlan_rdst default_dst;	/* default destination */
 	__be32		  saddr;	/* source address */
+	__be16		  dst_port;
 	__u16		  port_min;	/* source port range */
 	__u16		  port_max;
 	__u8		  tos;		/* TOS override */
@@ -190,7 +193,7 @@ static int vxlan_fdb_info(struct sk_buff *skb, struct vxlan_dev *vxlan,
 	if (send_ip && nla_put_be32(skb, NDA_DST, rdst->remote_ip))
 		goto nla_put_failure;
 
-	if (rdst->remote_port && rdst->remote_port != vxlan_port &&
+	if (rdst->remote_port && rdst->remote_port != vxlan->dst_port &&
 	    nla_put_be16(skb, NDA_PORT, rdst->remote_port))
 		goto nla_put_failure;
 	if (rdst->remote_vni != vxlan->default_dst.remote_vni &&
@@ -220,7 +223,7 @@ static inline size_t vxlan_nlmsg_size(void)
 	return NLMSG_ALIGN(sizeof(struct ndmsg))
 		+ nla_total_size(ETH_ALEN) /* NDA_LLADDR */
 		+ nla_total_size(sizeof(__be32)) /* NDA_DST */
-		+ nla_total_size(sizeof(__be32)) /* NDA_PORT */
+		+ nla_total_size(sizeof(__be16)) /* NDA_PORT */
 		+ nla_total_size(sizeof(__be32)) /* NDA_VNI */
 		+ nla_total_size(sizeof(__u32)) /* NDA_IFINDEX */
 		+ nla_total_size(sizeof(struct nda_cacheinfo));
@@ -315,7 +318,7 @@ static struct vxlan_fdb *vxlan_find_mac(struct vxlan_dev *vxlan,
 
 /* Add/update destinations for multicast */
 static int vxlan_fdb_append(struct vxlan_fdb *f,
-			    __be32 ip, __u32 port, __u32 vni, __u32 ifindex)
+			    __be32 ip, __be16 port, __u32 vni, __u32 ifindex)
 {
 	struct vxlan_rdst *rd_prev, *rd;
 
@@ -344,7 +347,7 @@ static int vxlan_fdb_append(struct vxlan_fdb *f,
 static int vxlan_fdb_create(struct vxlan_dev *vxlan,
 			    const u8 *mac, __be32 ip,
 			    __u16 state, __u16 flags,
-			    __u32 port, __u32 vni, __u32 ifindex,
+			    __be16 port, __u32 vni, __u32 ifindex,
 			    __u8 ndm_flags)
 {
 	struct vxlan_fdb *f;
@@ -442,7 +445,8 @@ static int vxlan_fdb_add(struct ndmsg *ndm, struct nlattr *tb[],
 	struct vxlan_dev *vxlan = netdev_priv(dev);
 	struct net *net = dev_net(vxlan->dev);
 	__be32 ip;
-	u32 port, vni, ifindex;
+	__be16 port;
+	u32 vni, ifindex;
 	int err;
 
 	if (!(ndm->ndm_state & (NUD_PERMANENT|NUD_REACHABLE))) {
@@ -460,11 +464,11 @@ static int vxlan_fdb_add(struct ndmsg *ndm, struct nlattr *tb[],
 	ip = nla_get_be32(tb[NDA_DST]);
 
 	if (tb[NDA_PORT]) {
-		if (nla_len(tb[NDA_PORT]) != sizeof(u32))
+		if (nla_len(tb[NDA_PORT]) != sizeof(__be16))
 			return -EINVAL;
-		port = nla_get_u32(tb[NDA_PORT]);
+		port = nla_get_be16(tb[NDA_PORT]);
 	} else
-		port = vxlan_port;
+		port = vxlan->dst_port;
 
 	if (tb[NDA_VNI]) {
 		if (nla_len(tb[NDA_VNI]) != sizeof(u32))
@@ -487,8 +491,8 @@ static int vxlan_fdb_add(struct ndmsg *ndm, struct nlattr *tb[],
 		ifindex = 0;
 
 	spin_lock_bh(&vxlan->hash_lock);
-	err = vxlan_fdb_create(vxlan, addr, ip, ndm->ndm_state, flags, port,
-		vni, ifindex, ndm->ndm_flags);
+	err = vxlan_fdb_create(vxlan, addr, ip, ndm->ndm_state, flags,
+			       port, vni, ifindex, ndm->ndm_flags);
 	spin_unlock_bh(&vxlan->hash_lock);
 
 	return err;
@@ -576,7 +580,7 @@ static void vxlan_snoop(struct net_device *dev,
 		err = vxlan_fdb_create(vxlan, src_mac, src_ip,
 				       NUD_REACHABLE,
 				       NLM_F_EXCL|NLM_F_CREATE,
-				       vxlan_port,
+				       vxlan->dst_port,
 				       vxlan->default_dst.remote_vni,
 				       0, NTF_SELF);
 		spin_unlock(&vxlan->hash_lock);
@@ -893,7 +897,7 @@ static void vxlan_set_owner(struct net_device *dev, struct sk_buff *skb)
  *     better and maybe available from hardware
  *   secondary choice is to use jhash on the Ethernet header
  */
-static u16 vxlan_src_port(const struct vxlan_dev *vxlan, struct sk_buff *skb)
+static __be16 vxlan_src_port(const struct vxlan_dev *vxlan, struct sk_buff *skb)
 {
 	unsigned int range = (vxlan->port_max - vxlan->port_min) + 1;
 	u32 hash;
@@ -903,7 +907,7 @@ static u16 vxlan_src_port(const struct vxlan_dev *vxlan, struct sk_buff *skb)
 		hash = jhash(skb->data, 2 * ETH_ALEN,
 			     (__force u32) skb->protocol);
 
-	return (((u64) hash * range) >> 32) + vxlan->port_min;
+	return htons((((u64) hash * range) >> 32) + vxlan->port_min);
 }
 
 static int handle_offloads(struct sk_buff *skb)
@@ -962,12 +966,12 @@ static netdev_tx_t vxlan_xmit_one(struct sk_buff *skb, struct net_device *dev,
 	struct udphdr *uh;
 	struct flowi4 fl4;
 	__be32 dst;
-	__u16 src_port, dst_port;
+	__be16 src_port, dst_port;
         u32 vni;
 	__be16 df = 0;
 	__u8 tos, ttl;
 
-	dst_port = rdst->remote_port ? rdst->remote_port : vxlan_port;
+	dst_port = rdst->remote_port ? rdst->remote_port : vxlan->dst_port;
 	vni = rdst->remote_vni;
 	dst = rdst->remote_ip;
 
@@ -1048,8 +1052,8 @@ static netdev_tx_t vxlan_xmit_one(struct sk_buff *skb, struct net_device *dev,
 	skb_reset_transport_header(skb);
 	uh = udp_hdr(skb);
 
-	uh->dest = htons(dst_port);
-	uh->source = htons(src_port);
+	uh->dest = dst_port;
+	uh->source = src_port;
 
 	uh->len = htons(skb->len);
 	uh->check = 0;
@@ -1311,6 +1315,7 @@ static void vxlan_setup(struct net_device *dev)
 	inet_get_local_port_range(&low, &high);
 	vxlan->port_min = low;
 	vxlan->port_max = high;
+	vxlan->dst_port = htons(vxlan_port);
 
 	vxlan->dev = dev;
 
@@ -1320,7 +1325,7 @@ static void vxlan_setup(struct net_device *dev)
 
 static const struct nla_policy vxlan_policy[IFLA_VXLAN_MAX + 1] = {
 	[IFLA_VXLAN_ID]		= { .type = NLA_U32 },
-	[IFLA_VXLAN_REMOTE]	= { .len = FIELD_SIZEOF(struct iphdr, daddr) },
+	[IFLA_VXLAN_GROUP]	= { .len = FIELD_SIZEOF(struct iphdr, daddr) },
 	[IFLA_VXLAN_LINK]	= { .type = NLA_U32 },
 	[IFLA_VXLAN_LOCAL]	= { .len = FIELD_SIZEOF(struct iphdr, saddr) },
 	[IFLA_VXLAN_TOS]	= { .type = NLA_U8 },
@@ -1333,6 +1338,7 @@ static const struct nla_policy vxlan_policy[IFLA_VXLAN_MAX + 1] = {
 	[IFLA_VXLAN_RSC]	= { .type = NLA_U8 },
 	[IFLA_VXLAN_L2MISS]	= { .type = NLA_U8 },
 	[IFLA_VXLAN_L3MISS]	= { .type = NLA_U8 },
+	[IFLA_VXLAN_PORT]	= { .type = NLA_U16 },
 };
 
 static int vxlan_validate(struct nlattr *tb[], struct nlattr *data[])
@@ -1402,8 +1408,8 @@ static int vxlan_newlink(struct net *net, struct net_device *dev,
 	}
 	dst->remote_vni = vni;
 
-	if (data[IFLA_VXLAN_REMOTE])
-		dst->remote_ip = nla_get_be32(data[IFLA_VXLAN_REMOTE]);
+	if (data[IFLA_VXLAN_GROUP])
+		dst->remote_ip = nla_get_be32(data[IFLA_VXLAN_GROUP]);
 
 	if (data[IFLA_VXLAN_LOCAL])
 		vxlan->saddr = nla_get_be32(data[IFLA_VXLAN_LOCAL]);
@@ -1462,6 +1468,9 @@ static int vxlan_newlink(struct net *net, struct net_device *dev,
 		vxlan->port_max = ntohs(p->high);
 	}
 
+	if (data[IFLA_VXLAN_PORT])
+		vxlan->dst_port = nla_get_be16(data[IFLA_VXLAN_PORT]);
+
 	SET_ETHTOOL_OPS(dev, &vxlan_ethtool_ops);
 
 	err = register_netdevice(dev);
@@ -1484,7 +1493,7 @@ static size_t vxlan_get_size(const struct net_device *dev)
 {
 
 	return nla_total_size(sizeof(__u32)) +	/* IFLA_VXLAN_ID */
-		nla_total_size(sizeof(__be32)) +/* IFLA_VXLAN_REMOTE */
+		nla_total_size(sizeof(__be32)) +/* IFLA_VXLAN_GROUP */
 		nla_total_size(sizeof(__u32)) +	/* IFLA_VXLAN_LINK */
 		nla_total_size(sizeof(__be32))+	/* IFLA_VXLAN_LOCAL */
 		nla_total_size(sizeof(__u8)) +	/* IFLA_VXLAN_TTL */
@@ -1497,6 +1506,7 @@ static size_t vxlan_get_size(const struct net_device *dev)
 		nla_total_size(sizeof(__u32)) +	/* IFLA_VXLAN_AGEING */
 		nla_total_size(sizeof(__u32)) +	/* IFLA_VXLAN_LIMIT */
 		nla_total_size(sizeof(struct ifla_vxlan_port_range)) +
+		nla_total_size(sizeof(__be16))+ /* IFLA_VXLAN_PORT */
 		0;
 }
 
@@ -1512,7 +1522,7 @@ static int vxlan_fill_info(struct sk_buff *skb, const struct net_device *dev)
 	if (nla_put_u32(skb, IFLA_VXLAN_ID, dst->remote_vni))
 		goto nla_put_failure;
 
-	if (dst->remote_ip && nla_put_be32(skb, IFLA_VXLAN_REMOTE, dst->remote_ip))
+	if (dst->remote_ip && nla_put_be32(skb, IFLA_VXLAN_GROUP, dst->remote_ip))
 		goto nla_put_failure;
 
 	if (dst->remote_ifindex && nla_put_u32(skb, IFLA_VXLAN_LINK, dst->remote_ifindex))
@@ -1533,7 +1543,8 @@ static int vxlan_fill_info(struct sk_buff *skb, const struct net_device *dev)
 	    nla_put_u8(skb, IFLA_VXLAN_L3MISS,
 			!!(vxlan->flags & VXLAN_F_L3MISS)) ||
 	    nla_put_u32(skb, IFLA_VXLAN_AGEING, vxlan->age_interval) ||
-	    nla_put_u32(skb, IFLA_VXLAN_LIMIT, vxlan->addrmax))
+	    nla_put_u32(skb, IFLA_VXLAN_LIMIT, vxlan->addrmax) ||
+	    nla_put_be16(skb, IFLA_VXLAN_PORT, vxlan->dst_port))
 		goto nla_put_failure;
 
 	if (nla_put(skb, IFLA_VXLAN_PORT_RANGE, sizeof(ports), &ports))
@@ -1663,5 +1674,5 @@ module_exit(vxlan_cleanup_module);
 
 MODULE_LICENSE("GPL");
 MODULE_VERSION(VXLAN_VERSION);
-MODULE_AUTHOR("Stephen Hemminger <shemminger@vyatta.com>");
+MODULE_AUTHOR("Stephen Hemminger <stephen@networkplumber.org>");
 MODULE_ALIAS_RTNL_LINK("vxlan");
