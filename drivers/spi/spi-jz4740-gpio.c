@@ -393,8 +393,6 @@ static int spi_jz4740_gpio_remove(struct platform_device *pdev)
 	struct spi_master *master = platform_get_drvdata(pdev);
 	struct spi_jz4740_gpio *prv = spi_master_get_devdata(master);
 
-	/* @@@ restore GPIOs ? */
-
 	spi_unregister_master(master);
 
 	free_gpios(prv);
