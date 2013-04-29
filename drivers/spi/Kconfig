@@ -193,6 +193,7 @@ config SPI_JZ4740_GPIO
 	select SPI_BITBANG
 	help
 	  This is a variant of SPI-GPIO optimized for the Ingenic Jz4740.
+	  Only supports SPI mode 0 and CS active-low.
 
 config SPI_LM70_LLP
 	tristate "Parallel port adapter for LM70 eval board (DEVELOPMENT)"
