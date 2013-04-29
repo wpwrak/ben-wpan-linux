@@ -176,10 +176,11 @@ static inline unsigned get_nsel(struct spi_device *spi)
 }
 
 
-static int spi_jz4740_gpio_transfer(struct spi_device *spi,
+static int spi_jz4740_gpio_transfer_one(struct spi_master *master,
 		struct spi_message *msg)
 {
-	struct spi_jz4740_gpio *prv = spi_master_get_devdata(spi->master);
+	struct spi_jz4740_gpio *prv = spi_master_get_devdata(master);
+	struct spi_device *spi = msg->spi;
 	uint32_t nsel = get_nsel(spi);
 	struct spi_transfer *xfer;
 	const uint8_t *tx;
@@ -187,7 +188,8 @@ static int spi_jz4740_gpio_transfer(struct spi_device *spi,
 
 	if (unlikely(list_empty(&msg->transfers))) {
 		dev_err(&spi->dev, "transfer is empty\n");
-		return -EINVAL;
+		msg->status = -EINVAL;
+		goto out;
 	}
 
 	msg->actual_length = 0;
@@ -208,7 +210,8 @@ static int spi_jz4740_gpio_transfer(struct spi_device *spi,
 	gpio_set_value(nsel, 1);
 
 	msg->status = 0;
-	msg->complete(msg->context);
+out:
+	spi_finalize_current_message(master);
 
 	return 0;
 }
@@ -357,7 +360,7 @@ static int spi_jz4740_gpio_probe(struct platform_device *pdev)
 	master->num_chipselect	= pdata->num_chipselect;
 	master->setup		= spi_jz4740_gpio_setup;
 	master->cleanup		= spi_jz4740_gpio_cleanup;
-	master->transfer	= spi_jz4740_gpio_transfer;
+	master->transfer_one_message = spi_jz4740_gpio_transfer_one;
 
 	/*
 	 * We don't [devm_]request_mem_region here since we don't need
