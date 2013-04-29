@@ -49,7 +49,6 @@ struct spi_jz4740_gpio {
 #define	PxPIN	(prv->port_base)
 #define	PxDATS	(prv->port_base+0x14)
 #define	PxDATC	(prv->port_base+0x18)
-#define	PxFUNC	(prv->port_base+0x48)
 
 #define	PIN_TO_PORT(pin)	((pin) >> 5)
 #define	PIN_TO_MASK(pin)	(1 << ((pin) & 31))
@@ -173,7 +172,7 @@ static void bidir(const struct spi_jz4740_gpio *prv,
 
 static inline unsigned get_nsel(struct spi_device *spi)
 {
-	return (unsigned int) spi->controller_data;
+	return (unsigned) spi->controller_data;
 }
 
 
@@ -181,8 +180,8 @@ static int spi_jz4740_gpio_transfer(struct spi_device *spi,
 		struct spi_message *msg)
 {
 	struct spi_jz4740_gpio *prv = spi_master_get_devdata(spi->master);
-	struct spi_transfer *xfer;
 	uint32_t nsel = get_nsel(spi);
+	struct spi_transfer *xfer;
 	const uint8_t *tx;
 	uint8_t *rx;
 
