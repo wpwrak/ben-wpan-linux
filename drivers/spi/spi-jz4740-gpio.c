@@ -139,12 +139,6 @@ done_1:
 done_0:
 		writel(sck, PxDATS);
 		writel(sck, PxDATC);
-
-		/*
-		 * Extra delay to meet AT86RF230/1 SPI timing.
-		 * (Parameter t5 = 250 ns in the data sheet.)
-		 */
-		writel(sck, PxDATC);
 	}
 }
 
