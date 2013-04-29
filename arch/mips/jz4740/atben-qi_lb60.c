@@ -11,6 +11,7 @@
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
+#include <linux/gpio.h>
 #include <linux/delay.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/spi_gpio.h>
@@ -62,7 +63,8 @@ static void atben_reset(void *dummy)
 	jz_gpio_port_set_value(JZ_GPIO_PORTD(0), 0, discharge);
 	msleep(100);    /* let power drop */
 
-	/* Hack: PD12/DAT2/IRQ is an active-high interrupt input, which is
+	/*
+	 * Hack: PD12/DAT2/IRQ is an active-high interrupt input, which is
 	 * indicated by setting its direction bit to 1. We thus must not
 	 * configure it as an "input".
 	 */
@@ -76,7 +78,7 @@ static void atben_reset(void *dummy)
 }
 
 
-/* ----- SPI master creation/removal --------------------------------------- */
+/* ----- SPI driver/device matching ---------------------------------------- */
 
 
 static const struct at86rf230_platform_data at86rf230_platform_data = {
