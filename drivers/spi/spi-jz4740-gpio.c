@@ -359,11 +359,11 @@ static int spi_jz4740_gpio_probe(struct platform_device *pdev)
 	master->cleanup		= spi_jz4740_gpio_cleanup;
 	master->transfer	= spi_jz4740_gpio_transfer;
 
-	if (!devm_request_mem_region(&pdev->dev, prv->port_addr, 0x100,
-			pdev->name)) {
-		dev_err(prv->dev, "can't request memory region\n");
-		goto out_busy;
-	}
+	/*
+	 * We don't [devm_]request_mem_region here since we don't need
+	 * exclusive access to port registers. Pin access conflicts are
+	 * resolved through gpiolib.
+	 */
 
 	prv->port_base = devm_ioremap(&pdev->dev, prv->port_addr, 0x100);
 	if (!prv->port_base) {
