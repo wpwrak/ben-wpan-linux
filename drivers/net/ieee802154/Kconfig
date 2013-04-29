@@ -35,16 +35,6 @@ config IEEE802154_AT86RF230
         tristate "AT86RF230/231 transceiver driver"
         depends on SPI
 
-config IEEE802154_ATBEN
-	boolean "ATBEN 8:10 SPI-GPIO framework"
-	depends on IEEE802154_AT86RF230 && SPI && JZ4740_QI_LB60
-	---help---
-	  "Glue" driver for the ATBEN IEEE 802.15.4 board in a Ben NanoNote.
-	  This driver combines the AT86RF230 driver with a suitable SPI-GPIO
-	  driver and provides glue functions and configuration data.
-
-	  Say Y here to enable the ATBEN 8:10 SPI-GPIO framework.
-
 config IEEE802154_MRF24J40
        tristate "Microchip MRF24J40 transceiver driver"
        depends on IEEE802154_DRIVERS && MAC802154

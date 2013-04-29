@@ -1,5 +1,5 @@
 /*
- * atben.c - SPI-GPIO framework for ATBEN
+ * atben-qi_lb60.c - SPI-GPIO framework for ATBEN on Jz4740
  *
  * Written 2011, 2013 by Werner Almesberger
  *

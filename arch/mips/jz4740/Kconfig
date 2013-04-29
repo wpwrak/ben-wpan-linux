@@ -6,4 +6,14 @@ choice
 config JZ4740_QI_LB60
 	bool "Qi Hardware Ben NanoNote"
 
+config JZ4740_QI_LB60_ATBEN
+	bool "ATBEN 8:10 SPI-GPIO framework"
+	depends on JZ4740_QI_LB60 && SPI && IEEE802154_AT86RF230
+	---help---
+	  Framework for the ATBEN IEEE 802.15.4 board in a Ben NanoNote.
+	  Combines the AT86RF230 driver with a suitable SPI-GPIO driver
+	  and provides glue functions and configuration data.
+
+	  Say Y here to enable the ATBEN 8:10 SPI-GPIO framework.
+
 endchoice
