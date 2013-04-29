@@ -377,13 +377,15 @@ static int spi_jz4740_gpio_probe(struct platform_device *pdev)
 	err = spi_register_master(master);
 	if (err) {
 		dev_err(prv->dev, "can't register master\n");
-		goto out;
+		goto out_master;
 	}
 
 	return 0;
 
 out_busy:
 	err = -EBUSY;
+out_master:
+	free_gpios(prv);
 out:
 	platform_set_drvdata(pdev, NULL);
 	spi_master_put(master);
