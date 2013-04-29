@@ -9,7 +9,6 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
@@ -120,15 +119,4 @@ static int __init atben_init(void)
 
 	return platform_device_register(&atben_device);
 }
-
-static void __exit atben_exit(void)
-{
-	platform_device_unregister(&atben_device);
-}
-
-module_init(atben_init);
-module_exit(atben_exit);
-
-MODULE_DESCRIPTION("ATBEN SPI-GPIO Framework");
-MODULE_AUTHOR("Werner Almesberger <werner@almesberger.net>");
-MODULE_LICENSE("GPL");
+device_initcall(atben_init);

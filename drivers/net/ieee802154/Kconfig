@@ -43,10 +43,7 @@ config IEEE802154_ATBEN
 	  This driver combines the AT86RF230 driver with a suitable SPI-GPIO
 	  driver and provides glue functions and configuration data.
 
-	  Say Y here to enable the ATBEN 8:10 SPI-GPIO driver.
-
-	  This driver can also be built as a module. To do so say M here.
-	  The module will be called 'atben'.
+	  Say Y here to enable the ATBEN 8:10 SPI-GPIO framework.
 
 config IEEE802154_MRF24J40
        tristate "Microchip MRF24J40 transceiver driver"
