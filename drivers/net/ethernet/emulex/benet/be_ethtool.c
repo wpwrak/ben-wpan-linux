@@ -85,6 +85,7 @@ static const struct be_ethtool_stat et_stats[] = {
 	{DRVSTAT_INFO(tx_pauseframes)},
 	{DRVSTAT_INFO(tx_controlframes)},
 	{DRVSTAT_INFO(rx_priority_pause_frames)},
+	{DRVSTAT_INFO(tx_priority_pauseframes)},
 	/* Received packets dropped when an internal fifo going into
 	 * main packet buffer tank (PMEM) overflows.
 	 */
@@ -680,7 +681,8 @@ be_get_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
 
 	if (be_is_wol_supported(adapter)) {
 		wol->supported |= WAKE_MAGIC;
-		wol->wolopts |= WAKE_MAGIC;
+		if (adapter->wol)
+			wol->wolopts |= WAKE_MAGIC;
 	} else
 		wol->wolopts = 0;
 	memset(&wol->sopass, 0, sizeof(wol->sopass));

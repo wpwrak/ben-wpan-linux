@@ -2456,7 +2456,7 @@ EXPORT_SYMBOL(netif_skb_features);
  *	2. skb is fragmented and the device does not support SG.
  */
 static inline int skb_needs_linearize(struct sk_buff *skb,
-				      int features)
+				      netdev_features_t features)
 {
 	return skb_is_nonlinear(skb) &&
 			((skb_has_frag_list(skb) &&
@@ -2565,8 +2565,11 @@ gso:
 	} while (skb->next);
 
 out_kfree_gso_skb:
-	if (likely(skb->next == NULL))
+	if (likely(skb->next == NULL)) {
 		skb->destructor = DEV_GSO_CB(skb)->destructor;
+		consume_skb(skb);
+		return rc;
+	}
 out_kfree_skb:
 	kfree_skb(skb);
 out:

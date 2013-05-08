@@ -1044,7 +1044,7 @@ static int dvb_net_feed_start(struct net_device *dev)
 		ret = priv->tsfeed->set(priv->tsfeed,
 					priv->pid, /* pid */
 					TS_PACKET, /* type */
-					DMX_TS_PES_OTHER, /* pes type */
+					DMX_PES_OTHER, /* pes type */
 					32768,     /* circular buffer size */
 					timeout    /* timeout */
 					);
@@ -1479,11 +1479,8 @@ static int dvb_net_close(struct inode *inode, struct file *file)
 
 	dvb_generic_release(inode, file);
 
-	if(dvbdev->users == 1 && dvbnet->exit == 1) {
-		fops_put(file->f_op);
-		file->f_op = NULL;
+	if(dvbdev->users == 1 && dvbnet->exit == 1)
 		wake_up(&dvbdev->wait_queue);
-	}
 	return 0;
 }
 

@@ -6030,10 +6030,11 @@ void bnx2x_nic_init_cnic(struct bnx2x *bp)
 	mmiowb();
 }
 
-void bnx2x_nic_init(struct bnx2x *bp, u32 load_code)
+void bnx2x_pre_irq_nic_init(struct bnx2x *bp)
 {
 	int i;
 
+	/* Setup NIC internals and enable interrupts */
 	for_each_eth_queue(bp, i)
 		bnx2x_init_eth_fp(bp, i);
 
@@ -6041,19 +6042,27 @@ void bnx2x_nic_init(struct bnx2x *bp, u32 load_code)
 	rmb();
 	bnx2x_init_rx_rings(bp);
 	bnx2x_init_tx_rings(bp);
+
 	if (IS_VF(bp)) {
 		bnx2x_memset_stats(bp);
 		return;
 	}
 
-	/* Initialize MOD_ABS interrupts */
-	bnx2x_init_mod_abs_int(bp, &bp->link_vars, bp->common.chip_id,
-			       bp->common.shmem_base, bp->common.shmem2_base,
-			       BP_PORT(bp));
+	if (IS_PF(bp)) {
+		/* Initialize MOD_ABS interrupts */
+		bnx2x_init_mod_abs_int(bp, &bp->link_vars, bp->common.chip_id,
+				       bp->common.shmem_base,
+				       bp->common.shmem2_base, BP_PORT(bp));
 
-	bnx2x_init_def_sb(bp);
-	bnx2x_update_dsb_idx(bp);
-	bnx2x_init_sp_ring(bp);
+		/* initialize the default status block and sp ring */
+		bnx2x_init_def_sb(bp);
+		bnx2x_update_dsb_idx(bp);
+		bnx2x_init_sp_ring(bp);
+	}
+}
+
+void bnx2x_post_irq_nic_init(struct bnx2x *bp, u32 load_code)
+{
 	bnx2x_init_eq_ring(bp);
 	bnx2x_init_internal(bp, load_code);
 	bnx2x_pf_init(bp);
@@ -6071,12 +6080,7 @@ void bnx2x_nic_init(struct bnx2x *bp, u32 load_code)
 				   AEU_INPUTS_ATTN_BITS_SPIO5);
 }
 
-/* end of nic init */
-
-/*
- * gzip service functions
- */
-
+/* gzip service functions */
 static int bnx2x_gunzip_init(struct bnx2x *bp)
 {
 	bp->gunzip_buf = dma_alloc_coherent(&bp->pdev->dev, FW_BUF_SIZE,
@@ -7769,6 +7773,8 @@ void bnx2x_free_mem(struct bnx2x *bp)
 
 	BNX2X_PCI_FREE(bp->eq_ring, bp->eq_mapping,
 		       BCM_PAGE_SIZE * NUM_EQ_PAGES);
+
+	BNX2X_PCI_FREE(bp->t2, bp->t2_mapping, SRC_T2_SZ);
 
 	bnx2x_iov_free_mem(bp);
 }
@@ -10663,10 +10669,12 @@ static void bnx2x_get_port_hwinfo(struct bnx2x *bp)
 
 	bp->link_params.speed_cap_mask[0] =
 		SHMEM_RD(bp,
-			 dev_info.port_hw_config[port].speed_capability_mask);
+			 dev_info.port_hw_config[port].speed_capability_mask) &
+		PORT_HW_CFG_SPEED_CAPABILITY_D0_MASK;
 	bp->link_params.speed_cap_mask[1] =
 		SHMEM_RD(bp,
-			 dev_info.port_hw_config[port].speed_capability_mask2);
+			 dev_info.port_hw_config[port].speed_capability_mask2) &
+		PORT_HW_CFG_SPEED_CAPABILITY_D0_MASK;
 	bp->port.link_config[0] =
 		SHMEM_RD(bp, dev_info.port_feature_config[port].link_config);
 

@@ -263,6 +263,27 @@ static void be_async_grp5_evt_process(struct be_adapter *adapter,
 	}
 }
 
+static void be_async_dbg_evt_process(struct be_adapter *adapter,
+		u32 trailer, struct be_mcc_compl *cmp)
+{
+	u8 event_type = 0;
+	struct be_async_event_qnq *evt = (struct be_async_event_qnq *) cmp;
+
+	event_type = (trailer >> ASYNC_TRAILER_EVENT_TYPE_SHIFT) &
+		ASYNC_TRAILER_EVENT_TYPE_MASK;
+
+	switch (event_type) {
+	case ASYNC_DEBUG_EVENT_TYPE_QNQ:
+		if (evt->valid)
+			adapter->qnq_vid = le16_to_cpu(evt->vlan_tag);
+		adapter->flags |= BE_FLAGS_QNQ_ASYNC_EVT_RCVD;
+	break;
+	default:
+		dev_warn(&adapter->pdev->dev, "Unknown debug event\n");
+	break;
+	}
+}
+
 static inline bool is_link_state_evt(u32 trailer)
 {
 	return ((trailer >> ASYNC_TRAILER_EVENT_CODE_SHIFT) &
@@ -275,6 +296,13 @@ static inline bool is_grp5_evt(u32 trailer)
 	return (((trailer >> ASYNC_TRAILER_EVENT_CODE_SHIFT) &
 		ASYNC_TRAILER_EVENT_CODE_MASK) ==
 				ASYNC_EVENT_CODE_GRP_5);
+}
+
+static inline bool is_dbg_evt(u32 trailer)
+{
+	return (((trailer >> ASYNC_TRAILER_EVENT_CODE_SHIFT) &
+		ASYNC_TRAILER_EVENT_CODE_MASK) ==
+				ASYNC_EVENT_CODE_QNQ);
 }
 
 static struct be_mcc_compl *be_mcc_compl_get(struct be_adapter *adapter)
@@ -324,6 +352,9 @@ int be_process_mcc(struct be_adapter *adapter)
 				(struct be_async_event_link_state *) compl);
 			else if (is_grp5_evt(compl->flags))
 				be_async_grp5_evt_process(adapter,
+				compl->flags, compl);
+			else if (is_dbg_evt(compl->flags))
+				be_async_dbg_evt_process(adapter,
 				compl->flags, compl);
 		} else if (compl->flags & CQE_FLAGS_COMPLETED_MASK) {
 				status = be_mcc_compl_process(adapter, compl);
@@ -930,19 +961,8 @@ int be_cmd_cq_create(struct be_adapter *adapter, struct be_queue_info *cq,
 		OPCODE_COMMON_CQ_CREATE, sizeof(*req), wrb, NULL);
 
 	req->num_pages =  cpu_to_le16(PAGES_4K_SPANNED(q_mem->va, q_mem->size));
-	if (lancer_chip(adapter)) {
-		req->hdr.version = 2;
-		req->page_size = 1; /* 1 for 4K */
-		AMAP_SET_BITS(struct amap_cq_context_lancer, nodelay, ctxt,
-								no_delay);
-		AMAP_SET_BITS(struct amap_cq_context_lancer, count, ctxt,
-						__ilog2_u32(cq->len/256));
-		AMAP_SET_BITS(struct amap_cq_context_lancer, valid, ctxt, 1);
-		AMAP_SET_BITS(struct amap_cq_context_lancer, eventable,
-								ctxt, 1);
-		AMAP_SET_BITS(struct amap_cq_context_lancer, eqid,
-								ctxt, eq->id);
-	} else {
+
+	if (BEx_chip(adapter)) {
 		AMAP_SET_BITS(struct amap_cq_context_be, coalescwm, ctxt,
 								coalesce_wm);
 		AMAP_SET_BITS(struct amap_cq_context_be, nodelay,
@@ -952,6 +972,18 @@ int be_cmd_cq_create(struct be_adapter *adapter, struct be_queue_info *cq,
 		AMAP_SET_BITS(struct amap_cq_context_be, valid, ctxt, 1);
 		AMAP_SET_BITS(struct amap_cq_context_be, eventable, ctxt, 1);
 		AMAP_SET_BITS(struct amap_cq_context_be, eqid, ctxt, eq->id);
+	} else {
+		req->hdr.version = 2;
+		req->page_size = 1; /* 1 for 4K */
+		AMAP_SET_BITS(struct amap_cq_context_v2, nodelay, ctxt,
+								no_delay);
+		AMAP_SET_BITS(struct amap_cq_context_v2, count, ctxt,
+						__ilog2_u32(cq->len/256));
+		AMAP_SET_BITS(struct amap_cq_context_v2, valid, ctxt, 1);
+		AMAP_SET_BITS(struct amap_cq_context_v2, eventable,
+								ctxt, 1);
+		AMAP_SET_BITS(struct amap_cq_context_v2, eqid,
+								ctxt, eq->id);
 	}
 
 	be_dws_cpu_to_le(ctxt, sizeof(req->context));
@@ -1020,6 +1052,7 @@ int be_cmd_mccq_ext_create(struct be_adapter *adapter,
 
 	/* Subscribe to Link State and Group 5 Events(bits 1 and 5 set) */
 	req->async_event_bitmap[0] = cpu_to_le32(0x00000022);
+	req->async_event_bitmap[0] |= cpu_to_le32(1 << ASYNC_EVENT_CODE_QNQ);
 	be_dws_cpu_to_le(ctxt, sizeof(req->context));
 
 	be_cmd_page_addrs_prepare(req->pages, ARRAY_SIZE(req->pages), q_mem);
@@ -1731,10 +1764,12 @@ int be_cmd_rx_filter(struct be_adapter *adapter, u32 flags, u32 value)
 	req->if_id = cpu_to_le32(adapter->if_handle);
 	if (flags & IFF_PROMISC) {
 		req->if_flags_mask = cpu_to_le32(BE_IF_FLAGS_PROMISCUOUS |
-					BE_IF_FLAGS_VLAN_PROMISCUOUS);
+					BE_IF_FLAGS_VLAN_PROMISCUOUS |
+					BE_IF_FLAGS_MCAST_PROMISCUOUS);
 		if (value == ON)
 			req->if_flags = cpu_to_le32(BE_IF_FLAGS_PROMISCUOUS |
-						BE_IF_FLAGS_VLAN_PROMISCUOUS);
+						BE_IF_FLAGS_VLAN_PROMISCUOUS |
+						BE_IF_FLAGS_MCAST_PROMISCUOUS);
 	} else if (flags & IFF_ALLMULTI) {
 		req->if_flags_mask = req->if_flags =
 				cpu_to_le32(BE_IF_FLAGS_MCAST_PROMISCUOUS);
@@ -2052,7 +2087,7 @@ int lancer_cmd_write_object(struct be_adapter *adapter, struct be_dma_mem *cmd,
 	spin_unlock_bh(&adapter->mcc_lock);
 
 	if (!wait_for_completion_timeout(&adapter->flash_compl,
-					 msecs_to_jiffies(30000)))
+					 msecs_to_jiffies(60000)))
 		status = -1;
 	else
 		status = adapter->flash_status;
@@ -2457,6 +2492,9 @@ int be_cmd_get_cntl_attributes(struct be_adapter *adapter)
 	struct mgmt_controller_attrib *attribs;
 	struct be_dma_mem attribs_cmd;
 
+	if (mutex_lock_interruptible(&adapter->mbox_lock))
+		return -1;
+
 	memset(&attribs_cmd, 0, sizeof(struct be_dma_mem));
 	attribs_cmd.size = sizeof(struct be_cmd_resp_cntl_attribs);
 	attribs_cmd.va = pci_alloc_consistent(adapter->pdev, attribs_cmd.size,
@@ -2464,11 +2502,9 @@ int be_cmd_get_cntl_attributes(struct be_adapter *adapter)
 	if (!attribs_cmd.va) {
 		dev_err(&adapter->pdev->dev,
 				"Memory allocation failure\n");
-		return -ENOMEM;
+		status = -ENOMEM;
+		goto err;
 	}
-
-	if (mutex_lock_interruptible(&adapter->mbox_lock))
-		return -1;
 
 	wrb = wrb_from_mbox(adapter);
 	if (!wrb) {
@@ -2489,8 +2525,9 @@ int be_cmd_get_cntl_attributes(struct be_adapter *adapter)
 
 err:
 	mutex_unlock(&adapter->mbox_lock);
-	pci_free_consistent(adapter->pdev, attribs_cmd.size, attribs_cmd.va,
-					attribs_cmd.dma);
+	if (attribs_cmd.va)
+		pci_free_consistent(adapter->pdev, attribs_cmd.size,
+				    attribs_cmd.va, attribs_cmd.dma);
 	return status;
 }
 
@@ -2788,6 +2825,9 @@ int be_cmd_get_acpi_wol_cap(struct be_adapter *adapter)
 			    CMD_SUBSYSTEM_ETH))
 		return -EPERM;
 
+	if (mutex_lock_interruptible(&adapter->mbox_lock))
+		return -1;
+
 	memset(&cmd, 0, sizeof(struct be_dma_mem));
 	cmd.size = sizeof(struct be_cmd_resp_acpi_wol_magic_config_v1);
 	cmd.va = pci_alloc_consistent(adapter->pdev, cmd.size,
@@ -2795,11 +2835,9 @@ int be_cmd_get_acpi_wol_cap(struct be_adapter *adapter)
 	if (!cmd.va) {
 		dev_err(&adapter->pdev->dev,
 				"Memory allocation failure\n");
-		return -ENOMEM;
+		status = -ENOMEM;
+		goto err;
 	}
-
-	if (mutex_lock_interruptible(&adapter->mbox_lock))
-		return -1;
 
 	wrb = wrb_from_mbox(adapter);
 	if (!wrb) {
@@ -2831,7 +2869,8 @@ int be_cmd_get_acpi_wol_cap(struct be_adapter *adapter)
 	}
 err:
 	mutex_unlock(&adapter->mbox_lock);
-	pci_free_consistent(adapter->pdev, cmd.size, cmd.va, cmd.dma);
+	if (cmd.va)
+		pci_free_consistent(adapter->pdev, cmd.size, cmd.va, cmd.dma);
 	return status;
 
 }
@@ -2964,16 +3003,18 @@ int be_cmd_get_func_config(struct be_adapter *adapter)
 	int status;
 	struct be_dma_mem cmd;
 
+	if (mutex_lock_interruptible(&adapter->mbox_lock))
+		return -1;
+
 	memset(&cmd, 0, sizeof(struct be_dma_mem));
 	cmd.size = sizeof(struct be_cmd_resp_get_func_config);
 	cmd.va = pci_alloc_consistent(adapter->pdev, cmd.size,
 				      &cmd.dma);
 	if (!cmd.va) {
 		dev_err(&adapter->pdev->dev, "Memory alloc failure\n");
-		return -ENOMEM;
+		status = -ENOMEM;
+		goto err;
 	}
-	if (mutex_lock_interruptible(&adapter->mbox_lock))
-		return -1;
 
 	wrb = wrb_from_mbox(adapter);
 	if (!wrb) {
@@ -3016,8 +3057,8 @@ int be_cmd_get_func_config(struct be_adapter *adapter)
 	}
 err:
 	mutex_unlock(&adapter->mbox_lock);
-	pci_free_consistent(adapter->pdev, cmd.size,
-			    cmd.va, cmd.dma);
+	if (cmd.va)
+		pci_free_consistent(adapter->pdev, cmd.size, cmd.va, cmd.dma);
 	return status;
 }
 
