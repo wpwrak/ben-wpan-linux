@@ -38,6 +38,8 @@
 struct at86rf230_local {
 	struct spi_device *spi;
 	int rstn, slp_tr, dig2;
+	void (*reset)(void *reset_data);
+	void *reset_data;
 
 	u8 part;
 	u8 vers;
@@ -832,14 +834,14 @@ static void at86rf230_fill_data(struct spi_device *spi)
 	lp->rstn = pdata->rstn;
 	lp->slp_tr = pdata->slp_tr;
 	lp->dig2 = pdata->dig2;
+	lp->reset = pdata->reset;
+	lp->reset_data = pdata->reset_data;
 }
 
 static void at86rf230_reset(struct at86rf230_local *lp)
 {
-	struct at86rf230_platform_data *pdata = lp->spi->dev.platform_data;
-
-	if (pdata->reset) {
-		pdata->reset(pdata->reset_data);
+	if (lp->reset) {
+		lp->reset(lp->reset_data);
 	} else {
 		msleep(1);
 		gpio_set_value(lp->rstn, 0);
@@ -903,7 +905,7 @@ static int at86rf230_probe(struct spi_device *spi)
 
 	at86rf230_fill_data(spi);
 
-	if (!pdata->reset) {
+	if (!lp->reset) {
 		rc = gpio_request(lp->rstn, "rstn");
 		if (rc)
 			goto err_rstn;
@@ -915,7 +917,7 @@ static int at86rf230_probe(struct spi_device *spi)
 			goto err_slp_tr;
 	}
 
-	if (!pdata->reset) {
+	if (!lp->reset) {
 		rc = gpio_direction_output(lp->rstn, 1);
 		if (rc)
 			goto err_gpio_dir;
@@ -999,7 +1001,7 @@ err_gpio_dir:
 	if (gpio_is_valid(lp->slp_tr))
 		gpio_free(lp->slp_tr);
 err_slp_tr:
-	if (!pdata->reset)
+	if (!lp->reset)
 		gpio_free(lp->rstn);
 err_rstn:
 	spi_set_drvdata(spi, NULL);
@@ -1010,7 +1012,6 @@ err_rstn:
 
 static int at86rf230_remove(struct spi_device *spi)
 {
-	struct at86rf230_platform_data *pdata = spi->dev.platform_data;
 	struct at86rf230_local *lp = spi_get_drvdata(spi);
 
 	ieee802154_unregister_device(lp->dev);
@@ -1020,7 +1021,7 @@ static int at86rf230_remove(struct spi_device *spi)
 
 	if (gpio_is_valid(lp->slp_tr))
 		gpio_free(lp->slp_tr);
-	if (!pdata->reset)
+	if (!lp->reset)
 		gpio_free(lp->rstn);
 
 	spi_set_drvdata(spi, NULL);
