@@ -2023,15 +2023,11 @@ static int jz4740_udc_probe(struct platform_device *pdev)
 	jz4740_udc->gadget.dev.parent = &pdev->dev;
 	jz4740_udc->gadget.dev.dma_mask = pdev->dev.dma_mask;
 
-	ret = device_register(&jz4740_udc->gadget.dev);
-	if (ret)
-		return ret;
-
 	jz4740_udc->clk = clk_get(&pdev->dev, "udc");
 	if (IS_ERR(jz4740_udc->clk)) {
 		ret = PTR_ERR(jz4740_udc->clk);
 		dev_err(&pdev->dev, "Failed to get udc clock: %d\n", ret);
-		goto err_device_unregister;
+		goto err;
 	}
 
 	platform_set_drvdata(pdev, jz4740_udc);
@@ -2050,7 +2046,7 @@ static int jz4740_udc_probe(struct platform_device *pdev)
 	if (!jz4740_udc->mem) {
 		ret = -EBUSY;
 		dev_err(&pdev->dev, "Failed to request mmio memory region\n");
-		goto err_device_unregister;
+		goto err;
 	}
 
 	jz4740_udc->base = ioremap(jz4740_udc->mem->start, resource_size(jz4740_udc->mem));
@@ -2088,8 +2084,7 @@ err_release_mem_region:
 	release_mem_region(jz4740_udc->mem->start, resource_size(jz4740_udc->mem));
 err_clk_put:
 	clk_put(jz4740_udc->clk);
-err_device_unregister:
-	device_unregister(&jz4740_udc->gadget.dev);
+err:
 	platform_set_drvdata(pdev, NULL);
 
 	return ret;
@@ -2111,7 +2106,6 @@ static int jz4740_udc_remove(struct platform_device *pdev)
 	clk_put(dev->clk);
 
 	platform_set_drvdata(pdev, NULL);
-	device_unregister(&dev->gadget.dev);
 
 	return 0;
 }
