@@ -39,10 +39,10 @@
 #define	DRIVER_NAME	"spi_jz4740_gpio"
 
 struct spi_jz4740_gpio {
-	const struct spi_gpio_platform_data *pdata;
 	struct device		*dev;
 	void __iomem		*port_base;
-	uint32_t		mosi, miso, sck;
+	int			mosi, miso, sck;
+	uint32_t		mosi_mask, miso_mask, sck_mask;
 	unsigned long		port_addr;
 };
 
@@ -59,8 +59,8 @@ struct spi_jz4740_gpio {
 
 static void rx_only(const struct spi_jz4740_gpio *prv, uint8_t *buf, int len)
 {
-	uint32_t miso = prv->miso;
-	uint32_t sck = prv->sck;
+	uint32_t miso = prv->miso_mask;
+	uint32_t sck = prv->sck_mask;
 	uint8_t v;
 
 	while (len--) {
@@ -92,8 +92,8 @@ static void rx_only(const struct spi_jz4740_gpio *prv, uint8_t *buf, int len)
 static void tx_only(const struct spi_jz4740_gpio *prv,
 		const uint8_t *buf, int len)
 {
-	uint32_t mosi = prv->mosi;
-	uint32_t sck = prv->sck;
+	uint32_t mosi = prv->mosi_mask;
+	uint32_t sck = prv->sck_mask;
 	uint8_t tv;
 
 	while (len--) {
@@ -148,9 +148,9 @@ done_0:
 static void bidir(const struct spi_jz4740_gpio *prv,
 		const uint8_t *tx, uint8_t *rx, int len)
 {
-	uint32_t mosi = prv->mosi;
-	uint32_t miso = prv->miso;
-	uint32_t sck = prv->sck;
+	uint32_t mosi = prv->mosi_mask;
+	uint32_t miso = prv->miso_mask;
+	uint32_t sck = prv->sck_mask;
 	uint8_t mask, tv, rv = 0;
 
 	while (len--) {
@@ -280,45 +280,42 @@ static void spi_jz4740_gpio_cleanup(struct spi_device *spi)
 
 static void free_gpios(struct spi_jz4740_gpio *prv)
 {
-	const struct spi_gpio_platform_data *pdata = prv->pdata;
-
-	if (prv->mosi)
-		gpio_free(pdata->mosi);
-	if (prv->miso)
-		gpio_free(pdata->miso);
-	if (prv->sck)
-		gpio_free(pdata->sck);
+	if (prv->mosi_mask)
+		gpio_free(prv->mosi);
+	if (prv->miso_mask)
+		gpio_free(prv->miso);
+	if (prv->sck_mask)
+		gpio_free(prv->sck);
 }
 
 
 static int setup_gpios(struct spi_jz4740_gpio *prv, const char *label,
 		uint16_t *flags)
 {
-	const struct spi_gpio_platform_data *pdata = prv->pdata;
 	int err;
 
-	if (pdata->mosi == -1) {
+	if (prv->mosi == -1) {
 		*flags |= SPI_MASTER_NO_TX;
 	} else {
-		err = get_gpio(prv, pdata->mosi, label, 0);
+		err = get_gpio(prv, prv->mosi, label, 0);
 		if (err)
 			return err;
-		prv->mosi = PIN_TO_MASK(pdata->mosi);
+		prv->mosi_mask = PIN_TO_MASK(prv->mosi);
 	}
 
-	if (pdata->miso == -1) {
+	if (prv->miso == -1) {
 		*flags |= SPI_MASTER_NO_RX;
 	} else {
-		err = get_gpio(prv, pdata->miso, label, -1);
+		err = get_gpio(prv, prv->miso, label, -1);
 		if (err)
 			goto fail;
-		prv->miso = PIN_TO_MASK(pdata->miso);
+		prv->miso_mask = PIN_TO_MASK(prv->miso);
 	}
 
-	err = get_gpio(prv, pdata->sck, label, 0);
+	err = get_gpio(prv, prv->sck, label, 0);
 	if (err)
 		goto fail;
-	prv->sck = PIN_TO_MASK(pdata->sck);
+	prv->sck_mask = PIN_TO_MASK(prv->sck);
 
 	return 0;
 
@@ -348,8 +345,11 @@ static int spi_jz4740_gpio_probe(struct platform_device *pdev)
 
 	prv = spi_master_get_devdata(master);
 	prv->dev = &pdev->dev;
-	prv->pdata = pdata;
 	platform_set_drvdata(pdev, spi_master_get(master));
+
+	prv->mosi = pdata->mosi;
+	prv->miso = pdata->miso;
+	prv->sck = pdata->sck;
 
 	err = setup_gpios(prv, dev_name(prv->dev), &master->flags);
 	if (err)
