@@ -484,8 +484,6 @@ static int jz4740_udc_stop(struct usb_gadget *g,
 	stop_activity(dev, driver);
 	spin_unlock_irqrestore(&dev->lock, flags);
 
-	driver->unbind(&dev->gadget);
-
 	udc_disable(dev);
 
 	DEBUG("unregistered driver '%s'\n", driver->driver.name);
