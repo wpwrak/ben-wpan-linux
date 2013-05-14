@@ -387,7 +387,6 @@ out_busy:
 out_master:
 	free_gpios(prv);
 out:
-	platform_set_drvdata(pdev, NULL);
 	spi_master_put(master);
 
 	return err;
@@ -402,7 +401,6 @@ static int spi_jz4740_gpio_remove(struct platform_device *pdev)
 
 	free_gpios(prv);
 
-	platform_set_drvdata(pdev, NULL);
 	spi_master_put(master);
 
 	return 0;
