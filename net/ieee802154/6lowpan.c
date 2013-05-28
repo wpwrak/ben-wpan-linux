@@ -723,7 +723,7 @@ frame_err:
 static int
 lowpan_process_data(struct sk_buff *skb)
 {
-	struct ipv6hdr hdr;
+	struct ipv6hdr hdr = {};
 	u8 tmp, iphc0, iphc1, num_context = 0;
 	u8 *_saddr, *_daddr;
 	int err;
