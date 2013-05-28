@@ -223,10 +223,6 @@ lowpan_uncompress_addr(struct sk_buff *skb, struct in6_addr *ipaddr,
 	if (prefcount > 0)
 		memcpy(ipaddr, prefix, prefcount);
 
-	if (prefcount + postcount < 16)
-		memset(&ipaddr->s6_addr[prefcount], 0,
-					16 - (prefcount + postcount));
-
 	if (postcount > 0) {
 		memcpy(&ipaddr->s6_addr[16 - postcount], skb->data, postcount);
 		skb_pull(skb, postcount);
@@ -869,8 +865,6 @@ lowpan_process_data(struct sk_buff *skb)
 
 		hdr.priority = ((tmp >> 2) & 0x0f);
 		hdr.flow_lbl[0] = ((tmp << 6) & 0xC0) | ((tmp >> 2) & 0x30);
-		hdr.flow_lbl[1] = 0;
-		hdr.flow_lbl[2] = 0;
 		break;
 	/*
 	 * Flow Label carried in-line
@@ -886,10 +880,6 @@ lowpan_process_data(struct sk_buff *skb)
 		break;
 	/* Traffic Class and Flow Label are elided */
 	case 3: /* 11b */
-		hdr.priority = 0;
-		hdr.flow_lbl[0] = 0;
-		hdr.flow_lbl[1] = 0;
-		hdr.flow_lbl[2] = 0;
 		break;
 	default:
 		break;
