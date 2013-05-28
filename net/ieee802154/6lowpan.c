@@ -916,7 +916,7 @@ lowpan_process_data(struct sk_buff *skb)
 	/* Source address uncompression */
 	pr_debug("source address stateless compression\n");
 	err = lowpan_uncompress_addr(skb, &hdr.saddr, lowpan_llprefix,
-				lowpan_unc_llconf[tmp], skb->data);
+				lowpan_unc_llconf[tmp], _saddr);
 	if (err)
 		goto drop;
 
@@ -945,7 +945,7 @@ lowpan_process_data(struct sk_buff *skb)
 	} else {
 		pr_debug("dest: stateless compression\n");
 		err = lowpan_uncompress_addr(skb, &hdr.daddr, lowpan_llprefix,
-				lowpan_unc_llconf[tmp], skb->data);
+				lowpan_unc_llconf[tmp], _daddr);
 		if (err)
 			goto drop;
 	}
