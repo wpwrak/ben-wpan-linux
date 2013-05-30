@@ -231,8 +231,7 @@ static ssize_t bonding_show_slaves(struct device *d,
 }
 
 /*
- * Set the slaves in the current bond.  The bond interface must be
- * up for this to succeed.
+ * Set the slaves in the current bond.
  * This is supposed to be only thin wrapper for bond_enslave and bond_release.
  * All hard work should be done there.
  */
@@ -316,6 +315,9 @@ static ssize_t bonding_store_mode(struct device *d,
 	int new_value, ret = count;
 	struct bonding *bond = to_bond(d);
 
+	if (!rtnl_trylock())
+		return restart_syscall();
+
 	if (bond->dev->flags & IFF_UP) {
 		pr_err("unable to update mode of %s because interface is up.\n",
 		       bond->dev->name);
@@ -352,6 +354,7 @@ static ssize_t bonding_store_mode(struct device *d,
 		bond->dev->name, bond_mode_tbl[new_value].modename,
 		new_value);
 out:
+	rtnl_unlock();
 	return ret;
 }
 static DEVICE_ATTR(mode, S_IRUGO | S_IWUSR,
@@ -359,7 +362,6 @@ static DEVICE_ATTR(mode, S_IRUGO | S_IWUSR,
 
 /*
  * Show and set the bonding transmit hash method.
- * The bond interface must be down to change the xmit hash policy.
  */
 static ssize_t bonding_show_xmit_hash(struct device *d,
 				      struct device_attribute *attr,
@@ -379,20 +381,12 @@ static ssize_t bonding_store_xmit_hash(struct device *d,
 	int new_value, ret = count;
 	struct bonding *bond = to_bond(d);
 
-	if (bond->dev->flags & IFF_UP) {
-		pr_err("%s: Interface is up. Unable to update xmit policy.\n",
-		       bond->dev->name);
-		ret = -EPERM;
-		goto out;
-	}
-
 	new_value = bond_parse_parm(buf, xmit_hashtype_tbl);
 	if (new_value < 0)  {
 		pr_err("%s: Ignoring invalid xmit hash policy value %.*s.\n",
 		       bond->dev->name,
 		       (int)strlen(buf) - 1, buf);
 		ret = -EINVAL;
-		goto out;
 	} else {
 		bond->params.xmit_policy = new_value;
 		bond_set_mode_ops(bond, bond->params.mode);
@@ -400,7 +394,7 @@ static ssize_t bonding_store_xmit_hash(struct device *d,
 			bond->dev->name,
 			xmit_hashtype_tbl[new_value].modename, new_value);
 	}
-out:
+
 	return ret;
 }
 static DEVICE_ATTR(xmit_hash_policy, S_IRUGO | S_IWUSR,
@@ -1315,7 +1309,6 @@ static ssize_t bonding_show_mii_status(struct device *d,
 }
 static DEVICE_ATTR(mii_status, S_IRUGO, bonding_show_mii_status, NULL);
 
-
 /*
  * Show current 802.3ad aggregator ID.
  */
@@ -1329,7 +1322,7 @@ static ssize_t bonding_show_ad_aggregator(struct device *d,
 	if (bond->params.mode == BOND_MODE_8023AD) {
 		struct ad_info ad_info;
 		count = sprintf(buf, "%d\n",
-				(bond_3ad_get_active_agg_info(bond, &ad_info))
+				bond_3ad_get_active_agg_info(bond, &ad_info)
 				?  0 : ad_info.aggregator_id);
 	}
 
@@ -1351,7 +1344,7 @@ static ssize_t bonding_show_ad_num_ports(struct device *d,
 	if (bond->params.mode == BOND_MODE_8023AD) {
 		struct ad_info ad_info;
 		count = sprintf(buf, "%d\n",
-				(bond_3ad_get_active_agg_info(bond, &ad_info))
+				bond_3ad_get_active_agg_info(bond, &ad_info)
 				?  0 : ad_info.ports);
 	}
 
@@ -1373,7 +1366,7 @@ static ssize_t bonding_show_ad_actor_key(struct device *d,
 	if (bond->params.mode == BOND_MODE_8023AD) {
 		struct ad_info ad_info;
 		count = sprintf(buf, "%d\n",
-				(bond_3ad_get_active_agg_info(bond, &ad_info))
+				bond_3ad_get_active_agg_info(bond, &ad_info)
 				?  0 : ad_info.actor_key);
 	}
 
@@ -1395,7 +1388,7 @@ static ssize_t bonding_show_ad_partner_key(struct device *d,
 	if (bond->params.mode == BOND_MODE_8023AD) {
 		struct ad_info ad_info;
 		count = sprintf(buf, "%d\n",
-				(bond_3ad_get_active_agg_info(bond, &ad_info))
+				bond_3ad_get_active_agg_info(bond, &ad_info)
 				?  0 : ad_info.partner_key);
 	}
 
