@@ -819,7 +819,8 @@ lowpan_process_data(struct sk_buff *skb)
 		}
 		spin_unlock_bh(&flist_lock);
 
-		return kfree_skb(skb), 0;
+		kfree_skb(skb);
+		return 0;
 	}
 	default:
 		break;
