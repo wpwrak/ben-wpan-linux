@@ -1120,13 +1120,64 @@ static int lowpan_set_address(struct net_device *dev, void *p)
 
 static int lowpan_get_mac_header_length(struct sk_buff *skb)
 {
+	uint16_t fc;
 	/*
-	 * Currently long addressing mode is supported only, so the overall
-	 * header size is 21:
-	 * FC SeqNum DPAN DA  SA  Sec
-	 * 2  +  1  +  2 + 8 + 8 + 0  = 21
+	 * fc + sq
+	 *  2 + 1  = 3
 	 */
-	return 21;
+	int len = 3;
+
+	/* 
+	 * first two bytes of mac is flow control field
+	 */
+	fc = *((uint16_t *)skb->data);
+
+	switch ((fc & IEEE802154_FC_DAMODE_MASK) >>
+			IEEE802154_FC_DAMODE_SHIFT) {
+		case IEEE802154_ADDR_NONE:
+			break;
+		case IEEE802154_ADDR_SHORT:
+			/* short len */
+			len += 2;
+			/* dest pan len */
+			len += 2;
+			break;
+		case IEEE802154_ADDR_LONG:
+			len += IEEE802154_ADDR_LEN;
+			/* dest pan len */
+			len += 2;
+			break;
+		default:
+			BUG();
+	}
+	
+	switch ((fc & IEEE802154_FC_SAMODE_MASK) >>
+			IEEE802154_FC_SAMODE_SHIFT) {
+		case IEEE802154_ADDR_NONE:
+			break;
+		case IEEE802154_ADDR_SHORT:
+			len += 2;
+			/* src pan len */
+			if (!(fc & IEEE802154_FC_INTRA_PAN))
+				len += 2;
+			break;
+		case IEEE802154_ADDR_LONG:
+			len += IEEE802154_ADDR_LEN;
+			/* src pan len */
+			if (!(fc & IEEE802154_FC_INTRA_PAN))
+				len += 2;
+			break;
+		default:
+			BUG();
+	}
+
+	/* 
+	 * TODO
+	 * Add len operation for currently unsupported security
+	 * field;
+	 */
+
+	return len;
 }
 
 static int
