@@ -862,7 +862,7 @@ lowpan_process_data(struct sk_buff *skb)
 	 * Traffic class carried in-line
 	 * ECN + DSCP (1 byte), Flow Label is elided
 	 */
-	case 1: /* 10b */
+	case 2: /* 10b */
 		if (lowpan_fetch_skb_u8(skb, &tmp))
 			goto drop;
 
@@ -875,11 +875,11 @@ lowpan_process_data(struct sk_buff *skb)
 	 * Flow Label carried in-line
 	 * ECN + 2-bit Pad + Flow Label (3 bytes), DSCP is elided
 	 */
-	case 2: /* 01b */
+	case 1: /* 01b */
 		if (lowpan_fetch_skb_u8(skb, &tmp))
 			goto drop;
 
-		hdr.flow_lbl[0] = (skb->data[0] & 0x0F) | ((tmp >> 2) & 0x30);
+		hdr.flow_lbl[0] = (tmp & 0x0F) | ((tmp >> 2) & 0x30);
 		memcpy(&hdr.flow_lbl[1], &skb->data[0], 2);
 		skb_pull(skb, 2);
 		break;
