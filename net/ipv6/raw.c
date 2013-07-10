@@ -112,7 +112,7 @@ static int icmpv6_filter(const struct sock *sk, const struct sk_buff *skb)
 	const struct icmp6hdr *hdr;
 
 	hdr = skb_header_pointer(skb, skb_transport_offset(skb),
-				 sizeof(_hdr), &_hdr);
+				 4, &_hdr);
 	if (hdr) {
 		const __u32 *data = &raw6_sk(sk)->filter.data[0];
 		unsigned int type = hdr->icmp6_type;
