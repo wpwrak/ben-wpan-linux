@@ -989,22 +989,24 @@ lowpan_process_data(struct sk_buff *skb)
 	/* Extract DAM to the tmp variable */
 	tmp = ((iphc1 & LOWPAN_IPHC_DAM_11) >> LOWPAN_IPHC_DAM_BIT) & 0x03;
 
-	/* check for Multicast Compression */
-	if (iphc1 & LOWPAN_IPHC_M) {
-		if (iphc1 & LOWPAN_IPHC_DAC) {
-			pr_debug("dest: context-based mcast compression\n");
-			/* TODO: implement this */
-		} else {
+	if (iphc1 & LOWPAN_IPHC_DAC) {
+		/* TODO: implement this */
+		netdev_warn(skb->dev, "DAC bit is set. Context-based not implemented. Drop packet.\n");
+		goto drop;
+	} else {
+		/* check for Multicast Compression */
+		if (iphc1 & LOWPAN_IPHC_M) {
 			err = lowpan_uncompress_multicast_daddr(
 					skb, &hdr.daddr, tmp);
 			if (err)
 				goto drop;
+		} else {
+			pr_debug("dest: stateless compression\n");
+			err = lowpan_uncompress_addr(
+					skb, &hdr.daddr, tmp, _daddr);
+			if (err)
+				goto drop;
 		}
-	} else {
-		pr_debug("dest: stateless compression\n");
-		err = lowpan_uncompress_addr(skb, &hdr.daddr, tmp, _daddr);
-		if (err)
-			goto drop;
 	}
 
 	/* UDP data uncompression */
