@@ -794,7 +794,7 @@ static int
 lowpan_process_data(struct sk_buff *skb)
 {
 	struct ipv6hdr hdr = {};
-	u8 tmp, iphc0, iphc1, num_context = 0;
+	u8 tmp, iphc0, iphc1;
 	const struct ieee802154_addr *_saddr, *_daddr;
 	int err;
 
@@ -906,9 +906,9 @@ lowpan_process_data(struct sk_buff *skb)
 
 	/* another if the CID flag is set */
 	if (iphc1 & LOWPAN_IPHC_CID) {
-		pr_debug("CID flag is set, increase header with one\n");
-		if (lowpan_fetch_skb_u8(skb, &num_context))
-			goto drop;
+		/* TODO: implement this */
+		netdev_warn(skb->dev, "CID bit is set. Context-based not implemented. Drop packet.\n");
+		goto drop;
 	}
 
 	hdr.version = 6;
