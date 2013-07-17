@@ -565,9 +565,10 @@ static int lowpan_header_create(struct sk_buff *skb,
 
 	/* source address compression */
 	if (is_addr_unspecified(&hdr->saddr)) {
+		/* Case SAM = 0 and SAC = 1 */
 		pr_debug("source address is unspecified, setting SAC\n");
 		iphc1 |= LOWPAN_IPHC_SAC;
-	/* TODO: context lookup */
+		/* TODO: context lookup */
 	} else if (is_addr_link_local(&hdr->saddr)) {
 		pr_debug("source address is link-local\n");
 		iphc1 |= lowpan_compress_addr_64(&hc06_ptr,
