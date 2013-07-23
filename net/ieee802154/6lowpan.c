@@ -589,7 +589,7 @@ static int lowpan_header_create(struct sk_buff *skb,
 		sa.addr_type = IEEE802154_ADDR_LONG;
 		sa.pan_id = ieee802154_mlme_ops(dev)->get_pan_id(dev);
 
-		memcpy(&(sa.hwaddr), saddr, 8);
+		memcpy(&(sa.hwaddr), saddr, IEEE802154_ADDR_LEN);
 		/* intra-PAN communications */
 		da.pan_id = ieee802154_mlme_ops(dev)->get_pan_id(dev);
 
