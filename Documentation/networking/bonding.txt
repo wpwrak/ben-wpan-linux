@@ -303,6 +303,12 @@ arp_validate
 	such a situation, validation of backup slaves must be
 	disabled.
 
+	The validation of ARP requests on backup slaves is mainly
+	helping bonding to decide which slaves are more likely to
+	work in case of the active slave failure, it doesn't really
+	guarantee that the backup slave will work if it's selected
+	as the next active slave.
+
 	This option is useful in network configurations in which
 	multiple bonding hosts are concurrently issuing ARPs to one or
 	more targets beyond a common switch.  Should the link between
@@ -314,6 +320,25 @@ arp_validate
 	associated with its own instance of bonding.
 
 	This option was added in bonding version 3.1.0.
+
+arp_all_targets
+
+	Specifies the quantity of arp_ip_targets that must be reachable
+	in order for the ARP monitor to consider a slave as being up.
+	This option affects only active-backup mode for slaves with
+	arp_validation enabled.
+
+	Possible values are:
+
+	any or 0
+
+		consider the slave up only when any of the arp_ip_targets
+		is reachable
+
+	all or 1
+
+		consider the slave up only when all of the arp_ip_targets
+		are reachable
 
 downdelay
 

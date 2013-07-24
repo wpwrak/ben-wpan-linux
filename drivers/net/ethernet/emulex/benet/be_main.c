@@ -782,16 +782,22 @@ static struct sk_buff *be_insert_vlan_in_pkt(struct be_adapter *adapter,
 
 	if (vlan_tx_tag_present(skb))
 		vlan_tag = be_get_tx_vlan_tag(adapter, skb);
-	else if (qnq_async_evt_rcvd(adapter) && adapter->pvid)
-		vlan_tag = adapter->pvid;
+
+	if (qnq_async_evt_rcvd(adapter) && adapter->pvid) {
+		if (!vlan_tag)
+			vlan_tag = adapter->pvid;
+		/* f/w workaround to set skip_hw_vlan = 1, informs the F/W to
+		 * skip VLAN insertion
+		 */
+		if (skip_hw_vlan)
+			*skip_hw_vlan = true;
+	}
 
 	if (vlan_tag) {
 		skb = __vlan_put_tag(skb, htons(ETH_P_8021Q), vlan_tag);
 		if (unlikely(!skb))
 			return skb;
 		skb->vlan_tci = 0;
-		if (skip_hw_vlan)
-			*skip_hw_vlan = true;
 	}
 
 	/* Insert the outer VLAN, if any */
@@ -1260,30 +1266,6 @@ static int be_set_vf_tx_rate(struct net_device *netdev,
 	else
 		adapter->vf_cfg[vf].tx_rate = rate;
 	return status;
-}
-
-static int be_find_vfs(struct be_adapter *adapter, int vf_state)
-{
-	struct pci_dev *dev, *pdev = adapter->pdev;
-	int vfs = 0, assigned_vfs = 0, pos;
-	u16 offset, stride;
-
-	pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_SRIOV);
-	if (!pos)
-		return 0;
-	pci_read_config_word(pdev, pos + PCI_SRIOV_VF_OFFSET, &offset);
-	pci_read_config_word(pdev, pos + PCI_SRIOV_VF_STRIDE, &stride);
-
-	dev = pci_get_device(pdev->vendor, PCI_ANY_ID, NULL);
-	while (dev) {
-		if (dev->is_virtfn && pci_physfn(dev) == pdev) {
-			vfs++;
-			if (dev->dev_flags & PCI_DEV_FLAGS_ASSIGNED)
-				assigned_vfs++;
-		}
-		dev = pci_get_device(pdev->vendor, PCI_ANY_ID, dev);
-	}
-	return (vf_state == ASSIGNED) ? assigned_vfs : vfs;
 }
 
 static void be_eqd_update(struct be_adapter *adapter, struct be_eq_obj *eqo)
@@ -2797,7 +2779,7 @@ static void be_vf_clear(struct be_adapter *adapter)
 	struct be_vf_cfg *vf_cfg;
 	u32 vf;
 
-	if (be_find_vfs(adapter, ASSIGNED)) {
+	if (pci_vfs_assigned(adapter->pdev)) {
 		dev_warn(&adapter->pdev->dev,
 			 "VFs are assigned to VMs: not disabling VFs\n");
 		goto done;
@@ -2899,7 +2881,7 @@ static int be_vf_setup(struct be_adapter *adapter)
 	int status, old_vfs, vf;
 	struct device *dev = &adapter->pdev->dev;
 
-	old_vfs = be_find_vfs(adapter, ENABLED);
+	old_vfs = pci_num_vf(adapter->pdev);
 	if (old_vfs) {
 		dev_info(dev, "%d VFs are already enabled\n", old_vfs);
 		if (old_vfs != num_vfs)
@@ -4200,9 +4182,10 @@ reschedule:
 	schedule_delayed_work(&adapter->work, msecs_to_jiffies(1000));
 }
 
+/* If any VFs are already enabled don't FLR the PF */
 static bool be_reset_required(struct be_adapter *adapter)
 {
-	return be_find_vfs(adapter, ENABLED) > 0 ? false : true;
+	return pci_num_vf(adapter->pdev) ? false : true;
 }
 
 static char *mc_name(struct be_adapter *adapter)
@@ -4259,6 +4242,9 @@ static int be_probe(struct pci_dev *pdev, const struct pci_device_id *pdev_id)
 		netdev->features |= NETIF_F_HIGHDMA;
 	} else {
 		status = dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
+		if (!status)
+			status = dma_set_coherent_mask(&pdev->dev,
+						       DMA_BIT_MASK(32));
 		if (status) {
 			dev_err(&pdev->dev, "Could not set PCI DMA Mask\n");
 			goto free_netdev;
@@ -4384,7 +4370,7 @@ static int be_resume(struct pci_dev *pdev)
 	if (status)
 		return status;
 
-	pci_set_power_state(pdev, 0);
+	pci_set_power_state(pdev, PCI_D0);
 	pci_restore_state(pdev);
 
 	/* tell fw we're ready to fire cmds */
@@ -4480,7 +4466,7 @@ static pci_ers_result_t be_eeh_reset(struct pci_dev *pdev)
 		return PCI_ERS_RESULT_DISCONNECT;
 
 	pci_set_master(pdev);
-	pci_set_power_state(pdev, 0);
+	pci_set_power_state(pdev, PCI_D0);
 	pci_restore_state(pdev);
 
 	/* Check if card is ok and fw is ready */

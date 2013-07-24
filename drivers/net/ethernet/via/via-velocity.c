@@ -2376,6 +2376,23 @@ out_0:
 	return ret;
 }
 
+#ifdef CONFIG_NET_POLL_CONTROLLER
+/**
+ *  velocity_poll_controller		-	Velocity Poll controller function
+ *  @dev: network device
+ *
+ *
+ *  Used by NETCONSOLE and other diagnostic tools to allow network I/P
+ *  with interrupts disabled.
+ */
+static void velocity_poll_controller(struct net_device *dev)
+{
+	disable_irq(dev->irq);
+	velocity_intr(dev->irq, dev);
+	enable_irq(dev->irq);
+}
+#endif
+
 /**
  *	velocity_mii_ioctl		-	MII ioctl handler
  *	@dev: network device
@@ -2641,6 +2658,9 @@ static const struct net_device_ops velocity_netdev_ops = {
 	.ndo_do_ioctl		= velocity_ioctl,
 	.ndo_vlan_rx_add_vid	= velocity_vlan_rx_add_vid,
 	.ndo_vlan_rx_kill_vid	= velocity_vlan_rx_kill_vid,
+#ifdef CONFIG_NET_POLL_CONTROLLER
+	.ndo_poll_controller = velocity_poll_controller,
+#endif
 };
 
 /**
@@ -3211,7 +3231,7 @@ static int velocity_resume(struct device *dev)
 	velocity_set_power_state(vptr, PCI_D0);
 
 	if (vptr->pdev) {
-		pci_enable_wake(vptr->pdev, 0, 0);
+		pci_enable_wake(vptr->pdev, PCI_D0, 0);
 		pci_restore_state(vptr->pdev);
 	}
 

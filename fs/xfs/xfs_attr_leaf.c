@@ -690,6 +690,8 @@ xfs_attr_shortform_to_leaf(xfs_da_args_t *args)
 	sf = (xfs_attr_shortform_t *)tmpbuffer;
 
 	xfs_idata_realloc(dp, -size, XFS_ATTR_FORK);
+	xfs_bmap_local_to_extents_empty(dp, XFS_ATTR_FORK);
+
 	bp = NULL;
 	error = xfs_da_grow_inode(args, &blkno);
 	if (error) {
@@ -3258,7 +3260,7 @@ xfs_attr3_leaf_inactive(
 			name_rmt = xfs_attr3_leaf_name_remote(leaf, i);
 			if (name_rmt->valueblk) {
 				lp->valueblk = be32_to_cpu(name_rmt->valueblk);
-				lp->valuelen = XFS_B_TO_FSB(dp->i_mount,
+				lp->valuelen = xfs_attr3_rmt_blocks(dp->i_mount,
 						    be32_to_cpu(name_rmt->valuelen));
 				lp++;
 			}
