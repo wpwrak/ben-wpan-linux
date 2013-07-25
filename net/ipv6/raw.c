@@ -108,14 +108,14 @@ found:
  */
 static int icmpv6_filter(const struct sock *sk, const struct sk_buff *skb)
 {
-	struct icmp6hdr *_hdr;
-	const struct icmp6hdr *hdr;
+	struct icmp6hdr_head _head;
+	const struct icmp6hdr_head *head;
 
-	hdr = skb_header_pointer(skb, skb_transport_offset(skb),
-				 4, &_hdr);
-	if (hdr) {
+	head = skb_header_pointer(skb, skb_transport_offset(skb),
+				  sizeof(_head), &_head);
+	if (head) {
 		const __u32 *data = &raw6_sk(sk)->filter.data[0];
-		unsigned int type = hdr->icmp6_type;
+		unsigned int type = head->type;
 
 		return (data[type >> 5] & (1U << (type & 31))) != 0;
 	}

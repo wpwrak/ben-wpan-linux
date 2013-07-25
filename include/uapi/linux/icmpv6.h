@@ -5,11 +5,15 @@
 #include <asm/byteorder.h>
 
 struct icmp6hdr {
+	struct icmp6hdr_head {
+		__u8		type;
+		__u8		code;
+		__sum16		cksum;
+	} icmpv6_head;
 
-	__u8		icmp6_type;
-	__u8		icmp6_code;
-	__sum16		icmp6_cksum;
-
+#define	icmp6_type	icmpv6_head.type
+#define	icmp6_code	icmpv6_head.code
+#define	icmp6_cksum	icmpv6_head.cksum
 
 	union {
 		__be32			un_data32[1];
