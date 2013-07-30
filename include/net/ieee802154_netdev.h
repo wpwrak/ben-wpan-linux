@@ -39,6 +39,12 @@ struct ieee802154_mac_cb {
 	struct ieee802154_addr da;
 	u8 flags;
 	u8 seq;
+	/*
+	 * dirty hack, this struct is to communicate
+	 * only between dower 802.15.4 to 6lowpan.
+	 * I use this for 6lowpan -> 802.15.4
+	 */
+	size_t lowpan_header_len;
 };
 
 static inline struct ieee802154_mac_cb *mac_cb(struct sk_buff *skb)

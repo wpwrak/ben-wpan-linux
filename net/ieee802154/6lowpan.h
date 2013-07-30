@@ -154,13 +154,11 @@
 	 (((a)[6]) == 0xFF) &&	\
 	 (((a)[7]) == 0xFF))
 
-#define LOWPAN_DISPATCH_IPV6	0x41 /* 01000001 = 65 */
-#define LOWPAN_DISPATCH_HC1	0x42 /* 01000010 = 66 */
 #define LOWPAN_DISPATCH_IPHC	0x60 /* 011xxxxx = ... */
 #define LOWPAN_DISPATCH_FRAG1	0xc0 /* 11000xxx */
 #define LOWPAN_DISPATCH_FRAGN	0xe0 /* 11100xxx */
 
-#define LOWPAN_DISPATCH_MASK	0xf8 /* 11111000 */
+#define LOWPAN_DISPATCH_MASK	0xe0 /* 11100000 */
 
 #define LOWPAN_FRAG_TIMEOUT	(HZ * 60)	/* time-out 60 sec */
 
@@ -176,7 +174,13 @@
  * so minimal payload size that we may guarantee is:
  *   MTU - MHR - MFR = 88 octets
  */
-#define LOWPAN_FRAG_SIZE	88
+#define LOWPAN_FRAGN_SIZE	88
+/*
+ * This is without 6lowpan header size
+ * TODO
+ * Check if 48 is maximimum 6lowpan header size
+ */
+#define LOWPAN_FRAG1_SIZE	40
 
 /*
  * Values of fields within the IPHC encoding first byte
