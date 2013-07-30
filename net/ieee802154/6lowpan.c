@@ -705,7 +705,7 @@ static int lowpan_header_create(struct sk_buff *skb,
 			memcpy(&(da.hwaddr), daddr, IEEE802154_ADDR_LEN);
 
 			/* request acknowledgment */
-			mac_cb(skb)->flags |= MAC_CB_FLAG_ACKREQ;
+			//mac_cb(skb)->flags |= MAC_CB_FLAG_ACKREQ;
 		}
 
 		return dev_hard_header(skb, lowpan_dev_info(dev)->real_dev,
