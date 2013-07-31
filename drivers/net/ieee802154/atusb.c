@@ -621,8 +621,33 @@ static int atusb_probe(struct usb_interface *interface,
 	atusb_write_reg(atusb, RG_TRX_STATE, STATE_FORCE_TRX_OFF);
 	msleep(1);	/* reset => TRX_OFF, tTR13 = 37 us */
 
+#if 0
+	/*
+	 * Calculating the maximum time available to empty the frame buffer
+	 * on reception:
+	 *
+	 * According to [1], the inter-frame gap is
+	 * R * 20 * 16 us + 128 us
+	 * where R is a random number from 0 to 7. Furthermore, we have 20 bit
+	 * times (80 us at 250 kbps) of SHR of the next frame before the
+	 * transceiver begins storing data in the frame buffer.
+	 *
+	 * This yields a minimum time of 208 us between the last data of a
+	 * frame and the first data of the next frame. This time is further
+	 * reduced by interrupt latency in the atusb firmware.
+	 *
+	 * atusb currently needs about 500 us to retrieve a maximum-sized
+	 * frame. We therefore have to allow reception of a new frame to begin
+	 * while we retrieve the previous frame.
+	 *
+	 * [1] "JN-AN-1035 Calculating data rates in an IEEE 802.15.4-based
+	 *      network", Jennic 2006.
+	 *     http://www.jennic.com/download_file.php?supportFile=JN-AN-1035%20Calculating%20802-15-4%20Data%20Rates-1v0.pdf
+	 */
+
 	atusb_write_reg(atusb,
 			SR_REG(SR_RX_SAFE_MODE), SR_VALUE(SR_RX_SAFE_MODE, 1));
+#endif
 	atusb_write_reg(atusb, RG_IRQ_MASK, 0xff);
 
 	ret = get_and_clear_error(atusb);
