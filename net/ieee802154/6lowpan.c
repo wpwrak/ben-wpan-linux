@@ -652,7 +652,7 @@ static int lowpan_header_create(struct sk_buff *skb,
 				LOWPAN_IPHC_DAM_BIT, &hdr->daddr, daddr);
 		} else {
 			pr_debug("dest address is unicast: using full one\n");
-			memcpy(hc06_ptr, &hdr->daddr.s6_addr16[0], 16);
+			memcpy(hc06_ptr, &hdr->daddr.s6_addr[0], 16);
 			hc06_ptr += 16;
 		}
 	}
@@ -666,6 +666,8 @@ static int lowpan_header_create(struct sk_buff *skb,
 
 	skb_pull(skb, sizeof(struct ipv6hdr));
 	memcpy(skb_push(skb, hc06_ptr - head), head, hc06_ptr - head);
+
+	pr_debug("lowpan header len: %d\n", hc06_ptr - head);
 
 	lowpan_raw_dump_table(__func__, "raw skb data dump", skb->data,
 				skb->len);
@@ -1140,7 +1142,7 @@ lowpan_skb_fragmentation(struct sk_buff *skb, struct net_device *dev)
 	head[3] = tag & 0xff;
 
 	err = lowpan_fragment_xmit(skb, head, header_length, LOWPAN_FRAG1_SIZE +
-			lowpan_get_mac_header_length(skb), 0, LOWPAN_DISPATCH_FRAG1);
+			mac_cb(skb)->lowpan_header_len, 0, LOWPAN_DISPATCH_FRAG1);
 	if (err) {
 		pr_debug("%s unable to send FRAG1 packet (tag: %d)",
 			 __func__, tag);
@@ -1328,6 +1330,34 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 	if (dev->type != ARPHRD_IEEE802154)
 		goto drop;
 
+	/* TODO why we need to handle it?
+	 */
+	if (*skb->data == LOWPAN_DISPATCH_IPV6) {
+		/*  Copy the packet so that the IPv6 header is
+		 * properly aligned.
+		 */
+		skb = skb_copy_expand(skb, NET_SKB_PAD - 1,
+				skb_tailroom(skb), GFP_ATOMIC);
+		if (!skb)
+			goto drop;
+
+		skb->protocol = htons(ETH_P_IPV6);
+		skb->pkt_type = PACKET_HOST;
+		skb_pull(skb, 1);
+                
+		skb_reset_network_header(skb);
+		skb_set_transport_header(skb, sizeof(struct ipv6hdr));
+
+
+		ret = lowpan_give_skb_to_devices(skb);
+		if (ret < 0)
+			goto drop;
+
+		goto out;
+	}
+
+	/* It's a 6lowpan packet!
+	 */
 	switch (*skb->data & LOWPAN_DISPATCH_MASK)
 	{
 	case LOWPAN_DISPATCH_IPHC:	/* ipv6 datagram */
@@ -1392,9 +1422,10 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 		spin_unlock_bh(&flist_lock);
 		break;
 	default:
-		break;
+		goto drop;
 	}
 
+out:
 	return NET_RX_SUCCESS;
 unlock_and_drop:
 	spin_unlock_bh(&flist_lock);

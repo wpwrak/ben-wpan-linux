@@ -154,11 +154,12 @@
 	 (((a)[6]) == 0xFF) &&	\
 	 (((a)[7]) == 0xFF))
 
+#define LOWPAN_DISPATCH_IPV6	0x41 /* 01000001 = 65 */
 #define LOWPAN_DISPATCH_IPHC	0x60 /* 011xxxxx = ... */
 #define LOWPAN_DISPATCH_FRAG1	0xc0 /* 11000xxx */
 #define LOWPAN_DISPATCH_FRAGN	0xe0 /* 11100xxx */
 
-#define LOWPAN_DISPATCH_MASK	0xe0 /* 11100000 */
+#define LOWPAN_DISPATCH_MASK	0xe0 /* 11111000 */
 
 #define LOWPAN_FRAG_TIMEOUT	(HZ * 60)	/* time-out 60 sec */
 
