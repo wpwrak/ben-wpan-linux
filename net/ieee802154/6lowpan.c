@@ -1281,13 +1281,13 @@ static int lowpan_validate(struct nlattr *tb[], struct nlattr *data[])
 static int lowpan_get_frag_info(struct sk_buff *skb, u16 *d_tag,
                 u16 *d_size, u8 *d_offset)
 {
-        u8 pattern;
+        u8 pattern, low;
 
         if (lowpan_fetch_skb_u8(skb, &pattern))
                 goto err;
-        if (lowpan_fetch_skb_u8(skb, (u8 *)d_size))
+        if (lowpan_fetch_skb_u8(skb, &low))
                 goto err;
-        *d_size = ((pattern & 7) << 8) | *d_size;
+        *d_size = (pattern & 7) << 8 | low;
 
         if (lowpan_fetch_skb_u16(skb, d_tag))
                 goto err;
