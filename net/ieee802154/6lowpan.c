@@ -410,7 +410,8 @@ static inline int lowpan_fetch_skb_u16(struct sk_buff *skb, u16 *val)
 }
 
 static int
-lowpan_uncompress_udp_header(struct sk_buff *skb, struct udphdr *uh)
+lowpan_uncompress_udp_header(struct sk_buff *skb, struct udphdr *uh,
+			     unsigned d_size)
 {
 	u8 tmp;
 
@@ -464,7 +465,10 @@ lowpan_uncompress_udp_header(struct sk_buff *skb, struct udphdr *uh)
 		 * here, we obtain the hint from the remaining size of the
 		 * frame
 		 */
-		uh->len = htons(skb->len + sizeof(struct udphdr));
+		if (d_size)
+			uh->len = htons(d_size -  sizeof(struct ipv6hdr));
+		else
+			uh->len = htons(skb->len + sizeof(struct udphdr));
 		pr_debug("uncompressed UDP length: src = %d", uh->len);
 	} else {
 		pr_debug("ERROR: unsupported NH format\n");
@@ -835,7 +839,7 @@ frame_err:
 }
 
 static struct sk_buff *
-lowpan_process_data(struct sk_buff *skb, struct ipv6hdr *hdr)
+lowpan_process_data(struct sk_buff *skb, struct ipv6hdr *hdr, unsigned d_size)
 {
 	u8 tmp, iphc0, iphc1;
 	const struct ieee802154_addr *_saddr, *_daddr;
@@ -977,7 +981,7 @@ lowpan_process_data(struct sk_buff *skb, struct ipv6hdr *hdr)
 		struct udphdr uh;
 		struct sk_buff *new;
 
-		if (lowpan_uncompress_udp_header(skb, &uh))
+		if (lowpan_uncompress_udp_header(skb, &uh, d_size))
 			goto drop;
 
 		/*
@@ -1362,7 +1366,7 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 	switch (*skb->data & LOWPAN_DISPATCH_MASK)
 	{
 	case LOWPAN_DISPATCH_IPHC:	/* ipv6 datagram */
-		skb = lowpan_process_data(skb, &hdr);
+		skb = lowpan_process_data(skb, &hdr, 0);
 		if (!skb)
 			goto drop;
 
@@ -1376,7 +1380,7 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 		spin_lock_bh(&flist_lock);
 		frame = lowpan_get_tag_frame(skb, d_tag, d_size);
 		
-		skb = lowpan_process_data(skb, &hdr);
+		skb = lowpan_process_data(skb, &hdr, d_size);
 		if (!skb)
 			goto unlock_and_drop;
 
