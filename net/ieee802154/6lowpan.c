@@ -834,7 +834,7 @@ frame_err:
 	return NULL;
 }
 
-static int
+static struct sk_buff *
 lowpan_process_data(struct sk_buff *skb, struct ipv6hdr *hdr)
 {
 	u8 tmp, iphc0, iphc1;
@@ -976,6 +976,7 @@ lowpan_process_data(struct sk_buff *skb, struct ipv6hdr *hdr)
 	if (iphc0 & LOWPAN_IPHC_NH_C) {
 		struct udphdr uh;
 		struct sk_buff *new;
+
 		if (lowpan_uncompress_udp_header(skb, &uh))
 			goto drop;
 
@@ -988,7 +989,7 @@ lowpan_process_data(struct sk_buff *skb, struct ipv6hdr *hdr)
 		kfree_skb(skb);
 
 		if (!new)
-			return -ENOMEM;
+			return NULL;
 
 		skb = new;
 
@@ -1011,10 +1012,10 @@ lowpan_process_data(struct sk_buff *skb, struct ipv6hdr *hdr)
 
 	lowpan_raw_dump_table(__func__, "raw header dump", (u8 *)hdr,
 			sizeof(struct ipv6hdr));
-	return 0;
+	return skb;
 drop:
 	kfree_skb(skb);
-	return -EINVAL;
+	return NULL;
 }
 
 static int lowpan_set_address(struct net_device *dev, void *p)
@@ -1361,8 +1362,8 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 	switch (*skb->data & LOWPAN_DISPATCH_MASK)
 	{
 	case LOWPAN_DISPATCH_IPHC:	/* ipv6 datagram */
-		ret = lowpan_process_data(skb, &hdr);
-		if (ret < 0)
+		skb = lowpan_process_data(skb, &hdr);
+		if (!skb)
 			goto drop;
 
 		hdr.payload_len = htons(skb->len);
@@ -1375,8 +1376,8 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 		spin_lock_bh(&flist_lock);
 		frame = lowpan_get_tag_frame(skb, d_tag, d_size);
 		
-		ret = lowpan_process_data(skb, &hdr);
-		if (ret < 0)
+		skb = lowpan_process_data(skb, &hdr);
+		if (!skb)
 			goto unlock_and_drop;
 
 		skb_copy_to_linear_data_offset(frame->skb, 0,
