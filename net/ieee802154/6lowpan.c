@@ -1400,8 +1400,8 @@ static int lowpan_rcv(struct sk_buff *skb, struct net_device *dev,
 		
 		frame->bytes_rcv += skb->len;
 
-		if (frame->bytes_rcv == d_size ||
-				frame->timer.expires > jiffies) {
+		if (frame->bytes_rcv == d_size) {
+			/* FIXME: frame->timer.expires > jiffies) */
 			list_del(&frame->list);
 			/*
 			 * TODO
